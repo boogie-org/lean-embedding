@@ -8,6 +8,7 @@ import LeanBoogie.Util
 -- import LeanBoogie.ITree
 import LeanBoogie.Boog
 import Auto
+-- import Duper
 
 namespace Boog
 open Lean Elab Meta Qq
@@ -304,6 +305,18 @@ theorem var_congr_ite
   -- : (prog1 st).2 x = (prog2 st).2 x
   := by aesop
 
+theorem state_congr_ite [Decidable c] {t e : Boog A}
+  -- (h_t :   c -> (t st).2 x = (t' st).2 x)
+  -- (h_e : ¬ c -> (e st).2 x = (e' st).2 x)
+  : (if c then t else e) st = (if c then t st else e st)
+  := by aesop
+
+theorem state_proj_congr_ite [Decidable c] {tst est :(A × S)}
+  -- (h_t :   c -> (t st).2 x = (t' st).2 x)
+  -- (h_e : ¬ c -> (e st).2 x = (e' st).2 x)
+  : (if c then tst else est).2 = (if c then (tst).2 else (est).2)
+  := by aesop
+
 namespace Example1
   procedure test1(x: int, y: int) returns (z: int) {
     x := (x + 1); x := x + 2;
@@ -329,6 +342,12 @@ namespace Example1
 end Example1
 
 
+  /-
+  (if state "x" ≤ 0
+    then (PUnit.unit, fun x => if x = "x" then -state "x" else state x)
+    else (PUnit.unit, state)
+  ).snd
+  -/
 
 namespace Example2
   procedure square(x: int) returns (z : int) {
@@ -341,21 +360,54 @@ namespace Example2
     y := 10;
   }
 
-  -- set_option pp.explicit true in
-  example (state) : square state = square' state := by
+  example (state : String -> Int) : square state = square' state := by
     unfold BoogieState at *
     rw [square, square']
     simp [Boog.skip, Boog.set, Boog.get, Boog.set, Boog.seq, Boog.ifthen, Boog.ifthenelse,
-      bind_eq2, ↓ite_bind,
+      bind_eq2, ↓ite_bind, var_congr_ite, state_congr_ite, state_proj_congr_ite,
       StateT.get, StateT.set, getThe, modifyThe, StateT.modifyGet,
       pure, StateT.pure, instMonadStateOfMonadStateOf, instMonadStateOfStateTOfMonad, ↓reduceIte]
     congr 1
-    funext x
-    unfold BoogieState
+    funext v
+    /-
+      (if v = "x" then
+        (if state "x" ≤ 0 then (PUnit.unit, fun x => if x = "x" then -state "x" else state x) else (PUnit.unit, state)).snd "x"
+        * (if state "x" ≤ 0 then (PUnit.unit, fun x => if x = "x" then -state "x" else state x) else (PUnit.unit, state)).snd "x"
+      else
+        if v = "y" then 10
+        else (if state "x" ≤ 0 then (PUnit.unit, fun x => if x = "x" then -state "x" else state x)
+              else (PUnit.unit, state)).snd v
+      )
+    = if v = "y" then 10 else if v = "x" then state "x" * state "x" else state v
+    -/
+    rw [state_proj_congr_ite]
+    simp [Boog.skip, Boog.set, Boog.get, Boog.set, Boog.seq, Boog.ifthen, Boog.ifthenelse,
+      bind_eq2, ↓ite_bind, var_congr_ite, state_congr_ite, state_proj_congr_ite,
+      StateT.get, StateT.set, getThe, modifyThe, StateT.modifyGet,
+      pure, StateT.pure, instMonadStateOfMonadStateOf, instMonadStateOfStateTOfMonad, ↓reduceIte]
+    aesop
     auto
     done
 end Example2
 
+
+
+/-
+.lam
+  (.base (.string))
+  (.app (.base (.int))
+    (.app (.base (.int))
+      (.app (.base (.prop))
+        (.base (.ite Int))
+        (.app (.base (.string))
+          (.app (.base (.string))
+            (.base (.eq (.base (.string))))
+            (.bvar 0))
+          (.base (.scst (.strVal "x")))))
+      (.app (.base (.int)) (.base (.icst (.ineg))) (.app (.base (.string)) (.atom 1) (.base (.scst (.strVal "x"))))))
+    (.app (.base (.string)) (.atom 1) (.bvar 0))
+  )
+-/
 
 namespace Example3
   procedure abs(x: int) returns (z : int) {
@@ -379,7 +431,6 @@ namespace Example3
     apply var_congr_ite "x" ?hx ?h'
     .
       intro h
-
       auto
     . aesop
       auto
