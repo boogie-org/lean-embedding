@@ -5,7 +5,7 @@ import Aesop
 import Init.Control.State
 import Init.Control.Except
 import LeanBoogie.Util
--- import LeanBoogie.ITree
+import LeanBoogie.ITree
 import LeanBoogie.Boog
 import Auto
 -- import Duper
@@ -95,9 +95,9 @@ def elabBoogieType : TSyntax `BoogieType -> BoogieElabM Q(Type)
 | `(BoogieType| bool) => return q(Bool)
 | stx => throwError "elabBoogieType: Unknown syntax {stx}"
 
-/-- With Lean 4.12 this hack won't be necessary. -/
-def _root_.Std.HashSet.union [BEq A] [Hashable A] (a b : Std.HashSet A) : Std.HashSet A :=
-  Std.HashSet.ofList (a.toList ++ b.toList)
+-- /-- With Lean 4.12 this hack won't be necessary. -/
+-- def _root_.Std.HashSet.union [BEq A] [Hashable A] (a b : Std.HashSet A) : Std.HashSet A :=
+--   Std.HashSet.ofList (a.toList ++ b.toList)
 
 /-- Collect names of mutable variables used in an expression. -/
 partial def collectMutVars (stx : TSyntax `BoogieExpr) : BoogieElabM (Std.HashSet Name) := do
@@ -274,6 +274,8 @@ elab stx:BoogieProc : command => do
       addDecl (.defnDecl decl)
       compileDecl (.defnDecl decl)
 
+-- # Helper lemmas
+
 theorem bind_eq2 (a: Boog A) (b: A -> Boog B) : (a >>= b : Boog B) = fun s => let x := a s ; b x.fst x.snd
 := by
   unfold bind Monad.toBind StateT.instMonad StateT.bind
@@ -285,6 +287,7 @@ theorem bind_eq2 (a: Boog A) (b: A -> Boog B) : (a >>= b : Boog B) = fun s => le
   : ∀v, t1 v = t2 v
   := by intro v; if h : x = v then exact h ▸ h_x else aesop
 
+@[simp]
 theorem ite_bind:
   ∀ [Monad m]
     [LawfulMonad m]
@@ -295,6 +298,7 @@ theorem ite_bind:
   = if c then m1 >>= k else m2 >>= k
   := by aesop
 
+@[simp]
 theorem var_congr_ite
   [Decidable c]
   (x : String)
@@ -305,133 +309,17 @@ theorem var_congr_ite
   -- : (prog1 st).2 x = (prog2 st).2 x
   := by aesop
 
+@[simp]
 theorem state_congr_ite [Decidable c] {t e : Boog A}
-  -- (h_t :   c -> (t st).2 x = (t' st).2 x)
-  -- (h_e : ¬ c -> (e st).2 x = (e' st).2 x)
   : (if c then t else e) st = (if c then t st else e st)
   := by aesop
 
+@[simp]
 theorem state_proj_congr_ite [Decidable c] {tst est :(A × S)}
-  -- (h_t :   c -> (t st).2 x = (t' st).2 x)
-  -- (h_e : ¬ c -> (e st).2 x = (e' st).2 x)
   : (if c then tst else est).2 = (if c then (tst).2 else (est).2)
   := by aesop
 
-namespace Example1
-  procedure test1(x: int, y: int) returns (z: int) {
-    x := (x + 1); x := x + 2;
-    y := y + 1; y := y + 2;
-    z := x + y;
-  }
-  procedure test2(x: int, y: int) returns (z: int) {
-    y := y + 1; y := y + 2;
-    x := x + 2; x := x + 1;
-    z := x + y;
-  }
-
-  example (state) : test1 state = test2 state := by
-    unfold BoogieState at state
-    rw [test1, test2]
-    simp [Boog.skip, Boog.set, Boog.get, Boog.set, Boog.seq, Boog.ifthen, Boog.ifthenelse,
-      bind_eq2,
-      StateT.get, StateT.set, getThe, modifyThe, StateT.modifyGet,
-      pure, StateT.pure, instMonadStateOfMonadStateOf, instMonadStateOfStateTOfMonad]
-    congr 1
-    funext v -- for all vars..
-    auto
-end Example1
-
-
-  /-
-  (if state "x" ≤ 0
-    then (PUnit.unit, fun x => if x = "x" then -state "x" else state x)
-    else (PUnit.unit, state)
-  ).snd
-  -/
-
-namespace Example2
-  procedure square(x: int) returns (z : int) {
-    if x <= 0 { x := -x; }
-    y := 10;
-    x := x * x;
-  }
-  procedure square'(x: int) returns (z : int) {
-    x := x * x;
-    y := 10;
-  }
-
-  example (state : String -> Int) : square state = square' state := by
-    unfold BoogieState at *
-    rw [square, square']
-    simp [Boog.skip, Boog.set, Boog.get, Boog.set, Boog.seq, Boog.ifthen, Boog.ifthenelse,
-      bind_eq2, ↓ite_bind, var_congr_ite, state_congr_ite, state_proj_congr_ite,
-      StateT.get, StateT.set, getThe, modifyThe, StateT.modifyGet,
-      pure, StateT.pure, instMonadStateOfMonadStateOf, instMonadStateOfStateTOfMonad, ↓reduceIte]
-    congr 1
-    funext v
-    /-
-      (if v = "x" then
-        (if state "x" ≤ 0 then (PUnit.unit, fun x => if x = "x" then -state "x" else state x) else (PUnit.unit, state)).snd "x"
-        * (if state "x" ≤ 0 then (PUnit.unit, fun x => if x = "x" then -state "x" else state x) else (PUnit.unit, state)).snd "x"
-      else
-        if v = "y" then 10
-        else (if state "x" ≤ 0 then (PUnit.unit, fun x => if x = "x" then -state "x" else state x)
-              else (PUnit.unit, state)).snd v
-      )
-    = if v = "y" then 10 else if v = "x" then state "x" * state "x" else state v
-    -/
-    rw [state_proj_congr_ite]
-    simp [Boog.skip, Boog.set, Boog.get, Boog.set, Boog.seq, Boog.ifthen, Boog.ifthenelse,
-      bind_eq2, ↓ite_bind, var_congr_ite, state_congr_ite, state_proj_congr_ite,
-      StateT.get, StateT.set, getThe, modifyThe, StateT.modifyGet,
-      pure, StateT.pure, instMonadStateOfMonadStateOf, instMonadStateOfStateTOfMonad, ↓reduceIte]
-    aesop
-    auto
-    done
-end Example2
-
-
-
-/-
-.lam
-  (.base (.string))
-  (.app (.base (.int))
-    (.app (.base (.int))
-      (.app (.base (.prop))
-        (.base (.ite Int))
-        (.app (.base (.string))
-          (.app (.base (.string))
-            (.base (.eq (.base (.string))))
-            (.bvar 0))
-          (.base (.scst (.strVal "x")))))
-      (.app (.base (.int)) (.base (.icst (.ineg))) (.app (.base (.string)) (.atom 1) (.base (.scst (.strVal "x"))))))
-    (.app (.base (.string)) (.atom 1) (.bvar 0))
-  )
--/
-
-namespace Example3
-  procedure abs(x: int) returns (z : int) {
-    if x <= 0 { x := -x; }
-  }
-  procedure abs'(x: int, y: int) returns (z : int) {
-    if x <= 0 {
-      y := x;
-      x := x * x;
-      x := x / y;
-    }
-  }
-
-  example (state) : (abs state).2 "x" = (abs' state).2 "x" := by
-    unfold BoogieState at state
-    rw [abs, abs']
-    simp [Boog.skip, Boog.set, Boog.get, Boog.set, Boog.seq, Boog.ifthen, Boog.ifthenelse,
-      bind_eq2, ↓ite_bind,
-      StateT.get, StateT.set, getThe, modifyThe, StateT.modifyGet,
-      pure, StateT.pure, instMonadStateOfMonadStateOf, instMonadStateOfStateTOfMonad, ↓reduceIte]
-    apply var_congr_ite "x" ?hx ?h'
-    .
-      intro h
-      auto
-    . aesop
-      auto
-end Example3
+@[simp]
+theorem state_var_ite_congr [Decidable c] {t e : String -> Int}
+  : (if c then t else e) v = (if c then t v else e v)
+  := by aesop
