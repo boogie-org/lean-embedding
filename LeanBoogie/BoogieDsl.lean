@@ -1,45 +1,31 @@
 import Lean
 import Std
 import Qq
-import Aesop
-import Init.Control.State
-import Init.Control.Except
-import LeanBoogie.Util
-import LeanBoogie.ITree
 import LeanBoogie.Boog
-import Auto
--- import Duper
 
 namespace Boog
 open Lean Elab Meta Qq
 open Std (HashSet HashMap)
 
-set_option auto.smt true
-set_option trace.auto.smt.printCommands true
-set_option trace.auto.smt.result true
-set_option trace.auto.printLemmas true
-set_option auto.smt.trust true
-set_option auto.smt.solver.name "z3"
-
 /-
   # Boogie DSL
+  There's an official Lean guide here: https://leanprover-community.github.io/lean4-metaprogramming-book/main/08_dsls.html
 -/
 
+/-- Knowledge about the boogie program while elaborating the boogie syntax.
+  You could remember all kinds of analysis in this monad, you'd potentially even have to.
+  Later: Also track jump labels / basic blocks. -/
 structure BoogieElab where
-  nextVarId : Nat := 0
-  /-- Mapping of mutable variable names to their ids. We use numeric IDs because lean-auto deals better with them than strings. -/
-  vars : Std.HashMap Name Nat := {}
+  /-- Mapping of mutable variable names to their ids. Later: Also remember their type. -/
+  vars : Std.HashSet Name := {}
 
 abbrev BoogieElabM := StateT BoogieElab TermElabM
-
-def allocVarId : BoogieElabM Nat := modifyGetThe BoogieElab (fun s => (s.nextVarId, { s with nextVarId := s.nextVarId + 1}))
 
 def declareVar (x : Name) : BoogieElabM Unit := do
   if (<- getThe BoogieElab).vars.contains x then
     throwError "Mutable variable {x} has already been declared"
   else
-    let varId <- allocVarId
-    modifyThe BoogieElab (fun s => { s with vars := s.vars.insert x varId})
+    modifyThe BoogieElab (fun s => { s with vars := s.vars.insert x })
 
 -- ## Syntax
 
@@ -71,21 +57,31 @@ section Syntax
   syntax BoogieExpr " == " BoogieExpr : BoogieFormula
   syntax BoogieFormula " && " BoogieFormula : BoogieFormula
   syntax BoogieFormula " => " BoogieFormula : BoogieFormula
+  syntax "∀" ident ": " BoogieType ", " BoogieFormula : BoogieFormula
 
   declare_syntax_cat BoogieCommand
   syntax "var " BoogieVarBinder "; " : BoogieCommand
   syntax "assume " BoogieFormula "; " : BoogieCommand
   syntax ident " := " BoogieExpr "; " : BoogieCommand
   syntax "return " BoogieExpr "; " : BoogieCommand
-  -- syntax "if " BoogieExpr " { " BoogieCommand* " }" : BoogieCommand
   syntax "if " BoogieExpr " { " BoogieCommand* " }" ("else" " { " BoogieCommand* " }")? : BoogieCommand
   syntax "while " BoogieExpr " { " BoogieCommand* " }" : BoogieCommand
 
   declare_syntax_cat BoogieProc
-  syntax "procedure " ident "(" BoogieVarBinder,* ")" " returns " "(" BoogieVarBinder ")" " { " BoogieCommand* " }" : BoogieProc
+  syntax "procedure " ident "(" BoogieVarBinder,* ")" (" returns " "(" BoogieVarBinder ")")? " { " BoogieCommand* " }" : BoogieProc
 end Syntax
 
--- ## Elaboration
+
+
+
+
+
+
+
+/-
+  ## Elaboration
+  Takes `Lean.Syntax` (or, well, `Lean.TSyntax`) and spits out `Lean.Expr`.
+-/
 
 section Elab
 
@@ -95,11 +91,7 @@ def elabBoogieType : TSyntax `BoogieType -> BoogieElabM Q(Type)
 | `(BoogieType| bool) => return q(Bool)
 | stx => throwError "elabBoogieType: Unknown syntax {stx}"
 
--- /-- With Lean 4.12 this hack won't be necessary. -/
--- def _root_.Std.HashSet.union [BEq A] [Hashable A] (a b : Std.HashSet A) : Std.HashSet A :=
---   Std.HashSet.ofList (a.toList ++ b.toList)
-
-/-- Collect names of mutable variables used in an expression. -/
+/-- Collect names of mutable (i.e. boogie) variables used in an expression. -/
 partial def collectMutVars (stx : TSyntax `BoogieExpr) : BoogieElabM (Std.HashSet Name) := do
   withRef stx (go stx)
 where go
@@ -237,28 +229,33 @@ def elabBoogieVarBinder : TSyntax `BoogieVarBinder -> BoogieElabM (Name × Q(Typ
   return (id.getId, ty)
 | stx => throwError "elabBoogieVarBinder: Unknown syntax {stx}"
 
-/-- Elaborate a boogie procedure. You will usually pass a fresh metavar into `Ty`. Returns its name and body, also constrains the type `Ty`. -/
+/-- Elaborate a boogie procedure. Returns the procedure name and its body. -/
 def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM (String × Q(Boog Unit))
-| `(BoogieProc| procedure $proc ( $binders,* ) returns ($retBinder) { $body* }) => do
+| `(BoogieProc| procedure $proc ( $binders,* ) $[returns ($retBinder)]? { $body* }) => do
   let binders <- binders.getElems.mapM fun (b : TSyntax _) => withRef b <| do elabBoogieVarBinder b
   binders.forM fun (n, _ty) => declareVar n
-  let (retVarName, _retVarType) <- withRef retBinder <| elabBoogieVarBinder retBinder
-  declareVar retVarName
+  if let some retBinder := retBinder then
+    let (retVarName, _retVarType) <- withRef retBinder <| elabBoogieVarBinder retBinder
+    declareVar retVarName
   return (proc.getId.toString, <- elabBoogieCommands body)
 | stx => throwError "elabBoogieProc: Unknown syntax {stx}"
 
 def runBoogieElab' (m : BoogieElabM A) : TermElabM (A × BoogieElab) := StateT.run m { }
+def runBoogieElab  (m : BoogieElabM A) : TermElabM A := Prod.fst <$> runBoogieElab' m
 
-def runBoogieElab (m : BoogieElabM A) : TermElabM A := Prod.fst <$> runBoogieElab' m
+/-
+  ## Embedding Boogie syntax into Lean syntax.
+  The star of the show.
+  So far we've been living in our own `Boogie*` syntax categories, and now we hook it up to one of
+  Lean's built-in syntax categories (e.g. `term`, `command`, `tactic`, etc).
+-/
 
-end Elab
+/-- A Boogie procedure, such as `procedure foo(x: int, y:int) { x := x + 10; }`.
+  Gets elaborated into `def foo : Boog Unit := ...`, so an actual executable monadic program.
 
-/-- Actually execute a boogie program. -/
-def runBoogie (m : Boog Unit) : BoogieState :=
-  let s₀ : BoogieState := (fun _ => 0)
-  let ((), s') := StateT.run m s₀
-  s'
-
+  You can run it via `runBoogie foo`, which gives you a `String -> Int`.
+  Then you can read individual variables with `#eval (runBoogie foo) "x"`.
+-/
 elab stx:BoogieProc : command => do
   Command.liftTermElabM do
     runBoogieElab do
@@ -274,52 +271,9 @@ elab stx:BoogieProc : command => do
       addDecl (.defnDecl decl)
       compileDecl (.defnDecl decl)
 
--- # Helper lemmas
+procedure foo(x: int) { x := x + 10; }
 
-theorem bind_eq2 (a: Boog A) (b: A -> Boog B) : (a >>= b : Boog B) = fun s => let x := a s ; b x.fst x.snd
-:= by
-  unfold bind Monad.toBind StateT.instMonad StateT.bind
-  simp
+#check runBoogie
+#eval (runBoogie foo) "x"
 
-@[aesop unsafe] theorem one_var {t1 t2 : String -> Int} (x : String)
-  (h_x     : t1 x = t2 x)
-  (h_other : (∀v, ¬ v = x -> t1 v = t2 v))
-  : ∀v, t1 v = t2 v
-  := by intro v; if h : x = v then exact h ▸ h_x else aesop
-
-@[simp]
-theorem ite_bind:
-  ∀ [Monad m]
-    [LawfulMonad m]
-    {c : Bool}
-    {m1 m2 : m a}
-    {k : a -> m b},
-   (if c then m1       else m2      ) >>= k
-  = if c then m1 >>= k else m2 >>= k
-  := by aesop
-
-@[simp]
-theorem var_congr_ite
-  [Decidable c]
-  (x : String)
-  {t e t' e' : Boog A}
-  (h_t :   c -> (t st).2 x = (t' st).2 x)
-  (h_e : ¬ c -> (e st).2 x = (e' st).2 x)
-  : ((if c then t else e) st).2 x = ((if c then t' else e') st).2 x
-  -- : (prog1 st).2 x = (prog2 st).2 x
-  := by aesop
-
-@[simp]
-theorem state_congr_ite [Decidable c] {t e : Boog A}
-  : (if c then t else e) st = (if c then t st else e st)
-  := by aesop
-
-@[simp]
-theorem state_proj_congr_ite [Decidable c] {tst est :(A × S)}
-  : (if c then tst else est).2 = (if c then (tst).2 else (est).2)
-  := by aesop
-
-@[simp]
-theorem state_var_ite_congr [Decidable c] {t e : String -> Int}
-  : (if c then t else e) v = (if c then t v else e v)
-  := by aesop
+end Elab

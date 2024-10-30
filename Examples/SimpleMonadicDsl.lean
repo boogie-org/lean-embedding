@@ -1,4 +1,6 @@
 import LeanBoogie.BoogieDsl
+import Auto
+import Aesop
 
 open Boog
 
