@@ -3,7 +3,7 @@ import Std
 import Qq
 import LeanBoogie.Boog
 
-namespace Boog
+namespace Boogie
 open Lean Elab Meta Qq
 open Std (HashSet HashMap)
 

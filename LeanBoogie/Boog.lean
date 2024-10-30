@@ -1,6 +1,8 @@
 import Std
 import Aesop
 
+namespace Boogie
+
 open Std (HashSet HashMap)
 
 /-
