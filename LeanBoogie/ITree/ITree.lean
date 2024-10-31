@@ -44,7 +44,7 @@ codata ITree (α : Type) ε ρ where -- TODO: change ε to be Type -> Type
 
 end Internal
 
-/-- For now, due to a limitation in ITrees, we hard code the answer type to one specific type. -/
+/-- For now, due to a limitation in QPF, we hard code the answer type to one specific type. -/
 abbrev Ans : Type := Int
 
 def ITree E A := Internal.ITree Ans E A

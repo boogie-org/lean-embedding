@@ -1,7 +1,8 @@
 import Lean
 import Std
 import Qq
-import LeanBoogie.Boog
+-- import LeanBoogie.Boog
+import LeanBoogie.ITree
 
 namespace Boogie
 open Lean Elab Meta Qq
@@ -39,25 +40,28 @@ section Syntax
   syntax ident ": " BoogieType : BoogieVarBinder
 
   declare_syntax_cat BoogieExpr
-  syntax:40 BoogieExpr " + " BoogieExpr : BoogieExpr
-  syntax:40 BoogieExpr " - " BoogieExpr : BoogieExpr
+  syntax:60 " -" BoogieExpr : BoogieExpr
   syntax:50 BoogieExpr " * " BoogieExpr : BoogieExpr
   syntax:50 BoogieExpr " / " BoogieExpr : BoogieExpr
-  syntax:60 " -" BoogieExpr : BoogieExpr
+  syntax:40 BoogieExpr " + " BoogieExpr : BoogieExpr
+  syntax:40 BoogieExpr " - " BoogieExpr : BoogieExpr
+  syntax:30 BoogieExpr " <= " BoogieExpr : BoogieExpr
+  syntax:30 BoogieExpr " == " BoogieExpr : BoogieExpr
   syntax ident : BoogieExpr -- variable
   syntax num : BoogieExpr -- literal
   syntax "(" BoogieExpr ")" : BoogieExpr
-  syntax:30 BoogieExpr " <= " BoogieExpr : BoogieExpr
-  syntax:30 BoogieExpr " == " BoogieExpr : BoogieExpr
 
   /-- Formulas can do things that boogie (boolean) expressions can't, e.g. forall quantifiers. -/
   declare_syntax_cat BoogieFormula
   syntax ident : BoogieFormula -- variables
-  syntax BoogieExpr " <= " BoogieExpr : BoogieFormula
-  syntax BoogieExpr " == " BoogieExpr : BoogieFormula
-  syntax BoogieFormula " && " BoogieFormula : BoogieFormula
-  syntax BoogieFormula " => " BoogieFormula : BoogieFormula
-  syntax "∀" ident ": " BoogieType ", " BoogieFormula : BoogieFormula
+  syntax:60 "(" BoogieFormula ")" : BoogieFormula
+  syntax:60 " !" BoogieFormula : BoogieFormula
+  syntax:50 BoogieExpr:max " <= " BoogieExpr:max : BoogieFormula
+  syntax:50 BoogieExpr:max " == " BoogieExpr:max : BoogieFormula
+  syntax:50 BoogieFormula " && " BoogieFormula : BoogieFormula
+  syntax:40 BoogieFormula " || " BoogieFormula : BoogieFormula
+  syntax:30 BoogieFormula " => " BoogieFormula : BoogieFormula
+  syntax:20 "∀" ident ": " BoogieType ", " BoogieFormula : BoogieFormula
 
   declare_syntax_cat BoogieCommand
   syntax "var " BoogieVarBinder "; " : BoogieCommand
@@ -110,6 +114,16 @@ where go
   else throwError "collectMutVars: No such mutable variable {x}"
 | stx => throwError "collectMutVars: Unknown syntax {stx}"
 
+/-- Collect names of mutable (i.e. boogie) variables used in a formula. -/
+partial def collectMutVarsFormula (stx : TSyntax `BoogieFormula) : BoogieElabM (Std.HashSet Name) := do
+  withRef stx (go stx)
+where go
+| `(BoogieFormula| ($x:BoogieFormula)) => collectMutVarsFormula x
+| `(BoogieFormula| !$x:BoogieFormula) => collectMutVarsFormula x
+| `(BoogieFormula| $x:BoogieExpr == $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
+| `(BoogieFormula| $x:BoogieExpr <= $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
+| stx => throwError "collectMutVarsFormula: Unknown syntax {stx}"
+
 /-- Read mutable variables from the boogie state monad, introducing them into the local context, and then run `m` in this new local context.
   Returns an expression like:
   ```
@@ -117,14 +131,14 @@ where go
     bind (get "y") fun y =>
       /- whatever m evaluates to -/
   ``` -/
-def withReadMutVars (vs : List Name) (A : Q(Type)) (m : BoogieElabM Q(Boog $A)) : BoogieElabM Q(Boog $A) := do
+def withReadMutVars (vs : List Name) (A : Q(Type)) (m : BoogieElabM Q(Mem $A)) : BoogieElabM Q(Mem $A) := do
   match vs with
   | [] => m
   | v :: vs =>
     let vStr : String := v.toString
-    let a : Q(Boog Int) := q(Boog.get $vStr)
-    let b : Q(Int -> Boog $A) <- withLocalDeclDQ v q(Int) fun (v : Q(Int)) => do
-      let e : Q(Boog $A) <- withReadMutVars vs A m
+    let a : Q(Mem Int) := q(Mem.get $vStr)
+    let b : Q(Int -> Mem $A) <- withLocalDeclDQ v q(Int) fun (v : Q(Int)) => do
+      let e : Q(Mem $A) <- withReadMutVars vs A m
       mkLambdaFVars #[v] e
     return q(Bind.bind $a $b)
 
@@ -182,39 +196,60 @@ mutual
     return ldecl.toExpr
   | stx => throwError "elabBoogieExprPure: Unknown syntax {stx}"
 
-  /-- Given a boogie expression `x + y`, produces an expression `bind (get "x") (fun x => bind (get "y") (fun y => pure (x + y))) : Boog Int`. -/
-  partial def elabBoogieExpr (A : Q(Type)) (stx : TSyntax `BoogieExpr) : BoogieElabM Q(Boog $A) := do
+  /-- Given a boogie expression `x + y`, produces an expression `bind (get "x") (fun x => bind (get "y") (fun y => pure (x + y))) : Mem Int`. -/
+  partial def elabBoogieExpr (A : Q(Type)) (stx : TSyntax `BoogieExpr) : BoogieElabM Q(Mem $A) := do
     let vars <- collectMutVars stx
     withReadMutVars vars.toList A (do
       let val : Q($A) <- elabBoogieExprPure A stx
-      let m_val : Q(Boog $A) := q(Pure.pure $val)
+      let m_val : Q(Mem $A) := q(Pure.pure $val)
       return m_val
     )
 end
 
+partial def elabBoogieFormula (stx : TSyntax `BoogieFormula) : BoogieElabM Q(Prop) := do
+  withRef stx (go stx)
+where go
+| `(BoogieFormula| ($x:BoogieFormula)) => elabBoogieFormula x
+| `(BoogieFormula| !$x:BoogieFormula) => do
+  let φ <- elabBoogieFormula x
+  return q(Not $φ)
+| `(BoogieFormula| $x:BoogieExpr == $y:BoogieExpr) => do
+  let A <- mkFreshExprMVarQ q(Type)
+  let x <- elabBoogieExpr A x
+  let y <- elabBoogieExpr A y
+  return q(Eq $x $y)
+| stx => throwError "elabBoogieFormula: Unknown syntax {stx}"
+
 mutual
-  partial def elabBoogieCommands (cmds : TSyntaxArray `BoogieCommand) : BoogieElabM Q(Boog Unit) := do
-    cmds.foldlM (fun (acc : Q(Boog Unit)) (cmd : TSyntax _) => do
-      let cmd : Q(Boog Unit) <- withRef cmd <| elabBoogieCommand cmd
-      return q(Boog.seq $acc $cmd)
-    ) q(Boog.skip)
+  partial def elabBoogieCommands (cmds : TSyntaxArray `BoogieCommand) : BoogieElabM Q(Mem Unit) := do
+    cmds.foldlM (fun (acc : Q(Mem Unit)) (cmd : TSyntax _) => do
+      let cmd : Q(Mem Unit) <- withRef cmd <| elabBoogieCommand cmd
+      return q(.seq $acc $cmd)
+    ) q(.skip)
 
   /-- Elaborates a command such as `x := 2 * y;` or `if ... { ... }` into a monadic action. -/
-  partial def elabBoogieCommand : TSyntax `BoogieCommand -> BoogieElabM Q(Boog Unit)
+  partial def elabBoogieCommand : TSyntax `BoogieCommand -> BoogieElabM Q(Mem Unit)
   | _stx@`(BoogieCommand| $x:ident := $e:BoogieExpr; ) => do
     let val <- elabBoogieExpr q(Int) e
     let xStr : String := x.getId.toString
-    let cmd : Q(Boog Unit) := q(Boog.set $xStr $val)
+    let cmd : Q(Mem Unit) := q(bind $val (fun val => Mem.set $xStr val))
     -- Term.addTermInfo' stx cmd
     return cmd
+  | `(BoogieCommand| assume $φ:BoogieFormula; ) => do
+    let vars <- collectMutVarsFormula φ
+    withReadMutVars vars.toList q(Unit) do
+      let φ : Q(Prop) <- elabBoogieFormula φ
+      let _dφ <- synthInstanceQ q(Decidable $φ) -- ! Need `Decidable`
+      -- have : Q(Bool) := q(@decide $φ $dφ)
+      return q(ITree.assume $φ) -- return q(if $φ then ITree.skip else ITree.spin)
   | `(BoogieCommand| if $cond { $t* } $[else { $e* }]?) => do
     let cond <- withRef cond <| elabBoogieExpr q(Bool) cond
     let t <- elabBoogieCommands t
     if let some e := e then
       let e <- elabBoogieCommands e
-      return q(Boog.ifthenelse $cond $t $e)
+      return q(ITree.ite $cond $t $e)
     else
-      return q(Boog.ifthen     $cond $t   )
+      return q(ITree.ifthen $cond $t)
   | `(BoogieCommand| while $cond { $body* }) => do
     let _cond <- withRef cond <| elabBoogieExpr q(Bool) cond
     let _body <- elabBoogieCommands body
@@ -230,7 +265,7 @@ def elabBoogieVarBinder : TSyntax `BoogieVarBinder -> BoogieElabM (Name × Q(Typ
 | stx => throwError "elabBoogieVarBinder: Unknown syntax {stx}"
 
 /-- Elaborate a boogie procedure. Returns the procedure name and its body. -/
-def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM (String × Q(Boog Unit))
+def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM (String × Q(Mem Unit))
 | `(BoogieProc| procedure $proc ( $binders,* ) $[returns ($retBinder)]? { $body* }) => do
   let binders <- binders.getElems.mapM fun (b : TSyntax _) => withRef b <| do elabBoogieVarBinder b
   binders.forM fun (n, _ty) => declareVar n
@@ -251,7 +286,7 @@ def runBoogieElab  (m : BoogieElabM A) : TermElabM A := Prod.fst <$> runBoogieEl
 -/
 
 /-- A Boogie procedure, such as `procedure foo(x: int, y:int) { x := x + 10; }`.
-  Gets elaborated into `def foo : Boog Unit := ...`, so an actual executable monadic program.
+  Gets elaborated into `def foo : Mem Unit := ...`, so an actual executable monadic program.
 
   You can run it via `runBoogie foo`, which gives you a `String -> Int`.
   Then you can read individual variables with `#eval (runBoogie foo) "x"`.
@@ -262,7 +297,7 @@ elab stx:BoogieProc : command => do
       let (name, body) <- elabBoogieProc stx
       let decl : DefinitionVal := {
         name := (<- getCurrNamespace) ++ name.toName
-        type := <- instantiateMVars q(Boog Unit)
+        type := <- instantiateMVars q(Mem Unit)
         value := <- instantiateMVars body
         levelParams := []
         hints := .abbrev
@@ -273,7 +308,7 @@ elab stx:BoogieProc : command => do
 
 procedure foo(x: int) { x := x + 10; }
 
-#check runBoogie
-#eval (runBoogie foo) "x"
+#check ITree.run foo (fun _ => 0) 10
+-- #eval! ITree.run foo (fun _ => 0) 10
 
 end Elab
