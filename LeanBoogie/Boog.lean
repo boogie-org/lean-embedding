@@ -12,6 +12,7 @@ open Std (HashSet HashMap)
 
 /-- Assigns values to every variable. Ideally you'd want `(v : String) -> v ∈ ValidVars -> Int`. -/
 abbrev BoogieState := String -> Int
+instance : EmptyCollection BoogieState := ⟨fun _ => 0⟩
 
 /-- State monad during execution of boogie programs. Assigns values to every variable. -/
 abbrev Boog : Type -> Type := StateM BoogieState
@@ -24,8 +25,6 @@ def Boog.set (v : String) (e : Boog Int) : Boog Unit := do
   let val <- e
   modifyThe BoogieState
       (fun f x => if x = v then val else f x)
-
-#check ite
 
 /-- This is a little ugly, because lean `if` actually takes a (decidable) `Prop`, not a `Bool` -/
 def Boog.ifthenelse (c : Boog Bool) (t e : Boog Unit) : Boog Unit := do
@@ -61,7 +60,6 @@ theorem bind_eq2 (a: Boog A) (b: A -> Boog B) : (a >>= b : Boog B) = fun s => le
 @[simp]
 theorem ite_bind:
   ∀ [Monad m]
-    [LawfulMonad m]
     {c : Bool}
     {m1 m2 : m a}
     {k : a -> m b},

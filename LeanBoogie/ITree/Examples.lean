@@ -36,6 +36,20 @@ def find (f : Nat -> Int) (K : Int) (a : Nat) : ITree Empty Nat :=
 theorem find_eq1 {f : Nat -> Int} {K : Int} {a : Nat} (h : f a = K) : find f K a = .ret a := sorry
 theorem find_eq2 {f : Nat -> Int} {K : Int} {a : Nat} (h : f a ≠ K) : find f K a = .tau (find f K (a + 1)) := by sorry
 
+/-- Proof by induction on k, i.e. where the searched-for value is. -/
+theorem find_correct_aux (f : Nat -> Int) (K : Int) (k a : Nat) (h_a : a <= k) (solvable : f k = K) : Eutt (find f K a) (.ret k) := by
+  induction k generalizing a with
+  | zero =>
+    have : a = 0 := by omega
+    cases this
+    rw [find_eq1 solvable]
+    exact Eutt.refl _
+  | succ k ih => -- k is still ahead of the current position (a)
+    done
+
+theorem find_correct (f : Nat -> Int) (K : Int) (k : Nat) (solvable : f k = K) : Eutt (find f K 0) (.ret k) :=
+  find_correct_aux f K k 0 (by omega) solvable
+
 /-- Like `find`, but on `Int` instead of `Nat`, and searches in both directions. -/
 def find2 (f : Int -> Int) (K : Int) (a b : Int) : ITree Empty Int :=
   ITree.corec (fun (a, b) =>
