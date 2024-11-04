@@ -7,6 +7,7 @@ namespace ITree
   # `ITree` forms a monad
 -/
 
+
 def pure (a : A) : ITree E A := .ret a
 
 def bind (ta : ITree E A) (tb : A -> ITree E B) : ITree E B :=
@@ -16,27 +17,22 @@ def bind (ta : ITree E A) (tb : A -> ITree E B) : ITree E B :=
       match ta.dest with
       | .ret (a : A) =>
         let tb : ITree E B := tb a
-        let tbdest : ITree.Base E B (ITree E B) := tb.dest
-        have : TypeFun.ofCurried Base ((Vec.reverse (Vec.nil.append1 B ::: E)).append1 (ITree E B)) = Base E B (ITree E B) := rfl
-        let INR : TypeVec.Arrow
-          ((Vec.reverse (Vec.nil.append1 B ::: E)).append1 (ITree E B))
-          ((Vec.reverse (Vec.nil.append1 B ::: E)).append1 (ITree E A ⊕ ITree E B))
-          := TypeVec.appendFun TypeVec.id Sum.inr
-        let ret : ITree.Base E B (ITree E A ⊕ ITree E B) := MvFunctor.map (F := TypeFun.ofCurried (n := 3) ITree.Base) INR (this ▸ tbdest)
+        let ret : ITree.Base E B (ITree E B) := tb.dest
+        let ret : ITree.Base E B (ITree E A ⊕ ITree E B) := MvFunctor.map (F := TypeFun.ofCurried (n := 3) ITree.Base) Base.Inr ret
         ret
       | .tau t => .tau (.inl t)
       | .vis e k => .vis e (fun x => .inl (k x))
     | .inr b =>
-      match b.dest with
-      | .ret (b : B) => .ret b
-      | .tau t => .tau (.inr t)
-      | .vis e k => .vis e (fun x => .inr (k x))
+      Base.replay b Sum.inr
+      -- match b.dest with
+      -- | .ret (b : B) => .ret b
+      -- | .tau (t : ITree E B) => .tau (.inr t)
+      -- | .vis e k => .vis e (fun x => .inr (k x))
   ) (Sum.inl ta)
 
 instance : Monad (ITree E) where
   pure := pure
   bind := bind
-
 instance : LawfulFunctor (ITree E) where
   map_const := sorry
   id_map := sorry
@@ -61,8 +57,7 @@ abbrev ifthen (c : ITree E Bool) (t : ITree E Unit) : ITree E Unit := ite c t sk
 
 def assume (φ : Prop) [Decidable φ] : ITree E Unit := if φ then skip else spin
 
-
-/- # Iter
+/- ## Iter
   From the ITrees paper, page 12:
   CoFixpoint iter (body : A → itree E (A + B)) : A → itree E B :=
     fun a ⇒ ab <- body a ;;
@@ -81,25 +76,23 @@ def assume (φ : Prop) [Decidable φ] : ITree E Unit := if φ then skip else spi
 -/
 
 /-- Repeat a computation until it returns `B`. -/
-def iter (body : A -> ITree E (Sum A B)) (a : A) : ITree E B := sorry
---   ITree.corec (β := Sum A Unit) (fun x =>
---     match x with
---     | .inl a =>
---       let res := bind (body a) (fun ab =>
---         match ab with
---         | .inl a => sorry
---         | .inr b => sorry
---       )
---       match res.dest with
---       | .ret a => sorry
---       | .tau a => sorry
---       | .vis e k => sorry
---       -- | .vis e k => .vis e (fun x => .inl (k x))
---     | .inr b =>
---       match b.dest with
---       | .ret (b : B) => .ret b
---       | .tau t => .tau (.inr t)
---       | .vis e k => .vis e (fun x => .inr (k x))
---   ) (Sum.inl a)
+def iter (body : A -> ITree E (A ⊕ B)) (a₀ : A) : ITree E B := sorry
+  -- ITree.corec (fun (x : A ⊕ ITree E (B)) =>
+  --   match x with
+  --   | .inl a =>
+  --     -- Run the body, if it returned `a` we iter again, if it returned `b` we are done.
+  --     let res : ITree E (A ⊕ B) := bind (body a) (fun ab =>
+  --       match ab with
+  --       | .inl a => .ret (.inl a)
+  --       | .inr b => .ret (.inr b)
+  --     )
+  --     match res.dest with
+  --     -- | .ret (a : A ⊕ B) => .ret sorry
+  --     | .ret (.inl a) => .tau (.inl a) -- call `iter body a`
+  --     | .ret (.inr b) => .ret b -- we are done
+  --     | .tau (t : ITree E _) => .tau (.inr t)
+  --     | .vis e k => sorry
+  --   | .inr b => Base.replay b .inr
+  -- ) (Sum.inl a₀)
 
 def loop (body : Sum C A -> ITree E (Sum C B)) (a : A) : ITree E B := sorry

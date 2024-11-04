@@ -57,12 +57,30 @@ def tau {E A} (t : ITree E A) : ITree E A := @Internal.ITree.tau Ans E A t
 def vis {E A} (e : E) (k : Ans -> ITree E A) := @Internal.ITree.vis E Ans A e k
 
 abbrev Base E A β := Internal.ITree.Base Ans E A β
+abbrev Base.Uncurried : TypeFun 3 := Internal.ITree.Base.Uncurried Ans
 
 def corec {E A β : Type} (f : β → ITree.Base E A β) (b : β) : ITree E A
   := MvQPF.Cofix.corec (n := 2) (α := (Vec.reverse (Vec.nil.append1 A ::: E))) (F := TypeFun.ofCurried (n := 3) (ITree.Base)) f b
 
 def dest {E A : Type} : ITree E A -> ITree.Base E A (ITree E A)
   := MvQPF.Cofix.dest
+
+/-- Just a convenience function. Re-plays a tree within another tree. -/
+def Base.replay (ta : ITree E A₁) (fTree : ITree E A₁ -> C) (fRet : A₁ -> A₂ := by exact id) : ITree.Base E A₂ C :=
+  match ta.dest with
+  | .ret (a : A₁) => .ret (fRet a)
+  | .tau (t : ITree E A₁) => .tau (fTree t)
+  | .vis e k => .vis e (fun x => fTree (k x))
+
+def _root_.TypeVec.ofList : (l : List Type) -> TypeVec l.length
+| [] => Vec.nil
+| t :: l => TypeVec.ofList l |>.append1 t
+
+def Base.Map (f : C -> D) : TypeVec.Arrow (TypeVec.ofList [C, B, E]) (TypeVec.ofList [D, B, E])
+  := TypeVec.appendFun TypeVec.id f
+
+def Base.Inr : TypeVec.Arrow (TypeVec.ofList [ITree E B, B, E]) (TypeVec.ofList [ITree E A ⊕ ITree E B, B, E])
+  := TypeVec.appendFun TypeVec.id Sum.inr
 
 @[cases_eliminator, elab_as_elim]
 def cases {E A : Type} {motive : ITree E A → Sort u}
@@ -100,6 +118,8 @@ def run (t : ITree E A) (f : E -> Ans) : Nat -> (List E) × Option A
     let t : ITree E A := k (f e)
     let (evs, ret) := run t f n
     exact (e :: evs, ret)
+
+abbrev KTree (E A B : Type) : Type := A -> ITree E B
 
 -- # Experimentation:
 
