@@ -1,4 +1,4 @@
 import LeanBoogie.ITree.ITree
 import LeanBoogie.ITree.Eutt
-import LeanBoogie.ITree.Monad
-import LeanBoogie.ITree.Mem
+import LeanBoogie.ITree.Imp
+import LeanBoogie.ITree.KTree

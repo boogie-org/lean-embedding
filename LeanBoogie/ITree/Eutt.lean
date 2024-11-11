@@ -14,6 +14,8 @@ inductive Eutt (x y : ITree E A) : Prop where
   (h_fixpoint : ∀a b, R a b → EuttF R a b)
   (h_R : R x y)
 
+infixr:20 " ~~ " => Eutt
+
 theorem Eutt.refl (x : ITree E A) : Eutt x x := by
   apply Eutt.intro (R := (· = ·))
   · rintro a b rfl
@@ -53,7 +55,9 @@ theorem Eutt.trans {x y z : ITree E A} : Eutt x y → Eutt y z → Eutt x z := b
     case taur t => sorry
   · exact ⟨y, h_R₁, h_R₂⟩
 
-theorem Eutt.ret  {t : ITree E A} : @Eutt E A (.ret r) (.ret r) := sorry
+theorem Eutt.ret : @Eutt E A (.ret r) (.ret r) := Eutt.refl _
+
+theorem Eutt.ret_congr (h : a = b) : Eutt (E := E) (.ret a) (.ret b) := h ▸ Eutt.refl _
 
 inductive Rel : ITree E A -> ITree E A -> Prop
 | refl : Rel t t
@@ -84,3 +88,11 @@ theorem Eutt.tau  {t : ITree E A} : Eutt (.tau t) (.tau t) := sorry
 
 theorem Eutt.vis  {t : ITree E A} {k₁ k₂ : Ans → ITree E A} : ∀a, Eutt (k₁ a) (k₂ a) -> Eutt (.vis e k₁) (.vis e k₂) := by
   sorry
+
+/-- Until we have setoid rewriting in Lean, we use this hack. -/
+axiom Eutt.eq {E A} {t1 t2 : ITree E A} : Eutt t1 t2 -> t1 = t2
+
+theorem Eutt.rw {t1 : ITree E A} {motive : (t2 : ITree E A) -> Eutt t1 t2 -> Prop} {t2 : ITree E A}
+  (prf : Eutt t1 t2)
+  : motive t1 (Eutt.refl t1) -> motive t2 prf
+  := sorry

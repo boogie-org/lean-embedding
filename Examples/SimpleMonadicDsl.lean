@@ -2,7 +2,7 @@ import LeanBoogie.BoogieDsl
 import Auto
 import Aesop
 
-open Boog
+open Boogie
 
 set_option auto.smt true
 set_option trace.auto.smt.printCommands true
@@ -13,26 +13,34 @@ set_option auto.smt.solver.name "z3"
 
 namespace Example1
   procedure test1(x: int, y: int) returns (z: int) {
-    x := (x + 1); x := x + 2;
-    y := y + 1; y := y + 2;
-    z := x + y;
-  }
-  procedure test2(x: int, y: int) returns (z: int) {
-    y := y + 1; y := y + 2;
-    x := x + 2; x := x + 1;
-    z := x + y;
+  bb0:
+    z := x;
+    z := z + y;
+    goto;
   }
 
-  example (state) : test1 state = test2 state := by
-    unfold BoogieState at state
+  procedure test2(x: int, y: int) returns (z: int) {
+  bb0:
+    z := y;
+    z := z + x;
+    goto;
+  }
+
+  #check test1
+
+  example (s : BoogieState) : Eutt test1 test2 := by
     rw [test1, test2]
-    simp [Boog.skip, Boog.set, Boog.get, Boog.set, Boog.seq, Boog.ifthen, Boog.ifthenelse,
-      bind_eq2,
-      StateT.get, StateT.set, getThe, modifyThe, StateT.modifyGet,
-      pure, StateT.pure, instMonadStateOfMonadStateOf, instMonadStateOfStateTOfMonad]
-    congr 1
-    funext v -- for all vars..
-    auto
+    simp [ITree.skip, ITree.seq, ITree.bind_ret, interp]
+
+    sorry
+
+  -- This is simply not true, because the reads and writes are in a different order.
+  example : Eutt test1 test2 := by
+    rw [test1, test2]
+    simp [ITree.skip, ITree.seq, ITree.bind_ret]
+
+    -- exact Eutt.refl _ -- this takes forever to typecheck (whnf) before failing.
+    -- done
 end Example1
 
 namespace Example2
