@@ -69,6 +69,7 @@ section Syntax
   syntax:40 BoogieExpr " - " BoogieExpr : BoogieExpr
   syntax:30 BoogieExpr " <= " BoogieExpr : BoogieExpr
   syntax:30 BoogieExpr " == " BoogieExpr : BoogieExpr
+  syntax ident noWs "(" BoogieExpr,* ")" : BoogieExpr -- boogie pure function call (non-effectful)
   syntax ident : BoogieExpr -- variable
   syntax num (noWs "bv" noWs num)? : BoogieExpr -- BitVec literal, e.g. `10bv32`
   -- syntax num (noWs "bv" noWs num)? : term -- BitVec literal, e.g. `10bv32`
@@ -143,7 +144,7 @@ def elabBoogieType : TSyntax `BoogieType -> BoogieElabM Q(Type)
 --   return q(BitVec $n)
 | stx => throwError "elabBoogieType: Unknown syntax {stx}"
 
-/-- Collect names of mutable (i.e. boogie) variables used in an expression. -/
+/-- Collect names of mutable (i.e. boogie) variables used in an expression. (Yes this is not very efficient) -/
 partial def collectMutVars (stx : TSyntax `BoogieExpr) : BoogieElabM (Std.HashSet Name) := do
   withRef stx (go stx)
 where go
@@ -156,6 +157,7 @@ where go
 | `(BoogieExpr| $x:BoogieExpr - $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
 | `(BoogieExpr| $x:BoogieExpr == $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
 | `(BoogieExpr| $x:BoogieExpr <= $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
+| `(BoogieExpr| $f:ident($args,*)) => args.getElems.foldlM (fun acc arg => return acc.union (<- collectMutVars arg)) {f.getId}
 | `(BoogieExpr| $x:ident) => do
   let x := x.getId
   if (<- getThe BoogieElab).vars.contains x then return Std.HashSet.ofList [x]
@@ -243,6 +245,13 @@ mutual
     let deq <- synthInstanceQ q(Decidable ($x <= $y))
     have : Q(Bool) := q(@decide ($x <= $y) $deq)
     return this
+  | stx@`(BoogieExpr| $f:ident($args,*)) => do
+    let fn <- realizeGlobalConstNoOverloadWithInfo f -- lookup function
+    let args <- args.getElems.mapM (elabBoogieExprPure (<- mkFreshExprMVar none))
+    let e <- mkAppM fn args
+    let eTy <- inferType e
+    if ¬(<- isDefEq eTy A) then throwErrorAt stx m!"Pure function application {stx} has type {eTy} but is expected to have type {A}"
+    return e
   | `(BoogieExpr| $x:ident) => do
     let some ldecl := (<- getLCtx).findFromUserName? x.getId | throwError "elabBoogieExpr: No such local var {x.getId}"
     if !(<- isDefEq ldecl.type q($A)) then throwError "elabBoogieExpr: Local var {x.getId} has type {ldecl.type} but is expected to have type {A}"

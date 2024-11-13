@@ -11,6 +11,9 @@ set_option trace.auto.printLemmas true
 set_option auto.smt.trust true
 set_option auto.smt.solver.name "z3"
 
+-- This example assumed that the Boogie DSL elaborated into a purely monadic version, without ITrees.
+-- It is now broken because the DSL elabs into ITrees.
+
 namespace Example1
   procedure test1(x: int, y: int) returns (z: int) {
   bb0:
