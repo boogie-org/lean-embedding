@@ -55,6 +55,10 @@ theorem Eutt.trans {x y z : ITree E A} : Eutt x y → Eutt y z → Eutt x z := b
     case taur t => sorry
   · exact ⟨y, h_R₁, h_R₂⟩
 
+instance : Setoid (ITree E A) where
+  r := Eutt
+  iseqv := ⟨Eutt.refl, Eutt.symm, Eutt.trans⟩
+
 theorem Eutt.ret : @Eutt E A (.ret r) (.ret r) := Eutt.refl _
 
 theorem Eutt.ret_congr (h : a = b) : Eutt (E := E) (.ret a) (.ret b) := h ▸ Eutt.refl _

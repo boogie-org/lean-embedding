@@ -1,6 +1,7 @@
 import LeanBoogie.ITree
 import LeanBoogie.Boog
 import LeanBoogie.Notation
+import LeanBoogie.Util
 
 namespace Boogie
 
@@ -40,32 +41,36 @@ def interp (tm : ITree MemEv A) : Boog Empty A := fun s₀ =>
 
 -- def interpk (k : KTree MemEv A B) : Book Empty A B := fun a => interp (k a)
 
-theorem interp_pure : interp (pure x) ~=~ pure x := sorry
+
+theorem interp_pure : interp (pure x) ~=~ pure x := sorry!
+theorem interp_ret : interp (.ret x) ~=~ pure x := interp_pure
 
 theorem interp_bind {ta : ITree MemEv A} {tb : A -> ITree MemEv B}
   : interp (bind ta tb) ~=~ bind (interp ta) (fun a => interp (tb a))
-  := sorry
+  := sorry!
 
 
 /-- Convenience mix of `interp_bind` and `bind_state_pull`. -/
 theorem interp_bind_pull {ta : ITree MemEv A} {tb : A -> ITree MemEv B}
   : interp (ITree.bind ta tb) s ~~ ITree.bind (interp ta s) (fun x => interp (tb x.1) x.2)
-  := sorry
+  := sorry!
 
 
 theorem interp_iter {body : A -> ITree MemEv (A ⊕ B)} {a₀ : A}
   : interp (ITree.iter body a₀) ~=~ Boog.iter (fun (a : A) => interp (body a)) a₀
-  := sorry
+  := sorry!
 
 -- theorem interpk_iter {body : A -> ITree MemEv (A ⊕ B)} {a₀ : A}
 --   -- : ∀a, ∀s, interpk (ITree.iter body) a s ~~ Boog.iter (interpk body) a s
 --   : interpk (ITree.iter body) ~~=~~ Boog.iter (interpk body)
 --   := by sorry
 
-theorem interp_read : interp (Mem.read x) ~=~ Boog.read x := sorry
-theorem interp_write : interp (Mem.write x val) ~=~ (Boog.write x val) := sorry
+theorem interp_read : interp (Mem.read x) ~=~ Boog.read x := sorry!
+theorem interp_write : interp (Mem.write x val) ~=~ (Boog.write x val) := sorry!
 
-theorem interp_ite : interp (ITree.ite c t e) ~=~ (do let c <- interp c; if c then interp t else interp e :) := sorry
+theorem interp_ite [Decidable φ] : interp (if φ then t else e) ~=~ (if φ then interp t else interp e) := sorry!
+
+theorem interp_ite' : interp (ITree.ite c t e) ~=~ (do let c <- interp c; if c then interp t else interp e :) := sorry!
 
 -- theorem interp_cat {f : KTree MemEv A B} {g : KTree MemEv B C}
 --   : interp (f a >>> g) ~~ (interp f >>> interpK g) a := sorry

@@ -20,3 +20,8 @@ def instantiateExprMVarsQ {m : Type → Type} {A : Q(Type)} [Monad m] [MonadMCtx
   return this
 
 def withRefQ {m : Type → Type} {A : Q(Type)} [Monad m] [MonadRef m] (ref : Syntax) (x : m Q($A)) : m Q($A) := Lean.withRef ref x
+
+
+-- For illustrative purposes, we want to suppress "warning: declaration uses sorry" often.
+axiom sorry! {P} : P
+macro "sorry!" : tactic => `(tactic| exact sorry!)
