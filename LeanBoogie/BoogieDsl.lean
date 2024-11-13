@@ -1,8 +1,10 @@
 import Lean
 import Std
 import Qq
--- import LeanBoogie.Boog
 import LeanBoogie.ITree
+import LeanBoogie.Boog
+import LeanBoogie.Mem
+import Batteries.Data.Array.Monadic
 
 namespace Boogie
 open Lean Elab Meta Qq
@@ -15,16 +17,25 @@ open ITree
   There's an official Lean guide here: https://leanprover-community.github.io/lean4-metaprogramming-book/main/08_dsls.html
 -/
 
+/-- An elaborated boogie block. -/
+structure EBlock where
+  label : String
+  /-- Any leading assumes for this block. -/
+  assumes : Q(ITree MemEv Bool)
+  /-- Code without the assumes or gotos. -/
+  code : Q(ITree MemEv Unit)
+  /-- The labels from `goto A, B, C;`. Empty list `[]` for `return;`. -/
+  gotos : Array String
+deriving Inhabited, Repr
+
 /-- Knowledge about the boogie program while elaborating the boogie syntax.
-  You could remember all kinds of analysis in this monad, you'd potentially even have to.
-  Later: Also track jump labels / basic blocks. -/
+  You could remember all kinds of analysis in this monad, you'd potentially even have to. -/
 structure BoogieElab where
   /-- Mapping of mutable variable names to their ids. Later: Also remember their type. -/
   vars : Std.HashSet Name := {}
-  nextBlockId : Nat := 0
-  /-- Mapping of block name to its internal id. If this is a metavariable, the block is being
-    referred to, but has not been declared. -/
-  blocks : Std.HashMap Name Q(Nat) := {}
+  blocks : Array EBlock := #[]
+deriving Inhabited
+
 
 abbrev BoogieElabM := StateT BoogieElab TermElabM
 
@@ -32,32 +43,7 @@ def declareVar (x : Name) : BoogieElabM Unit := do
   if (<- getThe BoogieElab).vars.contains x then throwError "Mutable variable {x} has already been declared"
   else modifyThe BoogieElab (fun s => { s with vars := s.vars.insert x })
 
-def allocBlockId : BoogieElabM Nat
-  := modifyGetThe BoogieElab fun st => (st.nextBlockId, {st with nextBlockId := st.nextBlockId + 1})
 
-def needBlock (x : Name) : BoogieElabM Q(Nat) := do
-  if let some id := (<- getThe BoogieElab).blocks.get? x then
-    return q($id)
-  else
-    -- We need this block, but it hasn't been declared yet.
-    let mvar : Q(Nat) <- mkFreshExprMVarQ q(Nat)
-    modifyThe BoogieElab fun st => { st with blocks := st.blocks.insert x mvar}
-    return mvar
-
-def declareBlock (x : Name) : BoogieElabM Nat := do
-  if let some id := (<- getThe BoogieElab).blocks.get? x then
-    let id <- instantiateMVars id
-    if ¬ id.hasMVar then
-      throwError "Duplicate block name {x}"
-    else
-      -- known block, but not declared yet. So instantiate its mvar using `isDefEq`.
-      let freshId : Nat <- allocBlockId
-      if !(<- isDefEq q($freshId) id) then throwError "delcareBlock: bug"
-      return freshId
-  else -- entirely new block
-    let id : Nat <- allocBlockId
-    modifyThe BoogieElab (fun s => { s with blocks := s.blocks.insert x q($id) })
-    return id
 
 -- ## Syntax
 
@@ -94,8 +80,9 @@ section Syntax
   syntax ident : BoogieFormula -- variables
   syntax:60 "(" BoogieFormula ")" : BoogieFormula
   syntax:60 " !" BoogieFormula : BoogieFormula
-  syntax BoogieExpr:max " <= " BoogieExpr:max : BoogieFormula
-  syntax BoogieExpr:max " == " BoogieExpr:max : BoogieFormula
+  syntax BoogieExpr:100 " == " BoogieExpr:100 : BoogieFormula
+  syntax BoogieExpr:100 " <= " BoogieExpr:100 : BoogieFormula
+  syntax BoogieExpr:100 " < "  BoogieExpr:100 : BoogieFormula
   syntax:50 BoogieFormula " && " BoogieFormula : BoogieFormula
   syntax:40 BoogieFormula " || " BoogieFormula : BoogieFormula
   syntax:30 BoogieFormula " => " BoogieFormula : BoogieFormula
@@ -183,6 +170,10 @@ where go
 | `(BoogieFormula| !$x:BoogieFormula) => collectMutVarsFormula x
 | `(BoogieFormula| $x:BoogieExpr == $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
 | `(BoogieFormula| $x:BoogieExpr <= $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
+| `(BoogieFormula| $x:BoogieExpr < $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
+| `(BoogieFormula| $x:BoogieFormula && $y:BoogieFormula) => return (<- collectMutVarsFormula x).union (<- collectMutVarsFormula y)
+| `(BoogieFormula| $x:BoogieFormula || $y:BoogieFormula) => return (<- collectMutVarsFormula x).union (<- collectMutVarsFormula y)
+| `(BoogieFormula| $x:BoogieFormula => $y:BoogieFormula) => return (<- collectMutVarsFormula x).union (<- collectMutVarsFormula y)
 | stx => throwError "collectMutVarsFormula: Unknown syntax {stx}"
 
 /-- Read mutable variables from the boogie state monad, introducing them into the local context, and then run `m` in this new local context.
@@ -192,14 +183,14 @@ where go
     bind (get "y") fun y =>
       /- whatever m evaluates to -/
   ``` -/
-def withReadMutVars (vs : List Name) (A : Q(Type)) (m : BoogieElabM Q(Mem $A)) : BoogieElabM Q(Mem $A) := do
+def withReadMutVars (vs : List Name) (A : Q(Type)) (m : BoogieElabM Q(ITree MemEv $A)) : BoogieElabM Q(ITree MemEv $A) := do
   match vs with
   | [] => m
   | v :: vs =>
     let vStr : String := v.toString
-    let a : Q(Mem Int) := q(Mem.read $vStr)
-    let b : Q(Int -> Mem $A) <- withLocalDeclDQ v q(Int) fun (v : Q(Int)) => do
-      let e : Q(Mem $A) <- withReadMutVars vs A m
+    let a : Q(ITree MemEv Int) := q(Mem.read $vStr)
+    let b : Q(Int -> ITree MemEv $A) <- withLocalDeclDQ v q(Int) fun (v : Q(Int)) => do
+      let e : Q(ITree MemEv $A) <- withReadMutVars vs A m
       mkLambdaFVars #[v] e
     return q(Bind.bind $a $b)
 
@@ -258,12 +249,12 @@ mutual
     return ldecl.toExpr
   | stx => throwError "elabBoogieExprPure: Unknown syntax {stx}"
 
-  /-- Given a boogie expression `x + y`, produces an expression `bind (get "x") (fun x => bind (get "y") (fun y => pure (x + y))) : Mem Int`. -/
-  partial def elabBoogieExpr (A : Q(Type)) (stx : TSyntax `BoogieExpr) : BoogieElabM Q(Mem $A) := do
+  /-- Given a boogie expression `x + y`, produces an expression `bind (get "x") (fun x => bind (get "y") (fun y => pure (x + y))) : ITree MemEv Int`. -/
+  partial def elabBoogieExpr (A : Q(Type)) (stx : TSyntax `BoogieExpr) : BoogieElabM Q(ITree MemEv $A) := do
     let vars <- collectMutVars stx
     withReadMutVars vars.toList A (do
       let val : Q($A) <- elabBoogieExprPure A stx
-      let m_val : Q(Mem $A) := q(Pure.pure $val)
+      let m_val : Q(ITree MemEv $A) := q(Pure.pure $val)
       return m_val
     )
 end
@@ -282,29 +273,54 @@ where go
   let x <- elabBoogieExprPure A x
   let y <- elabBoogieExprPure A y
   return q(Eq $x $y)
+| `(BoogieFormula| $x:BoogieExpr < $y:BoogieExpr) => do
+  let A <- mkFreshExprMVarQ q(Type)
+  let x <- elabBoogieExprPure A x
+  let y <- elabBoogieExprPure A y
+  let _ <- synthInstanceQ q(LT $A)
+  return q($x < $y)
+| `(BoogieFormula| $x:BoogieExpr <= $y:BoogieExpr) => do
+  let A <- mkFreshExprMVarQ q(Type)
+  let x <- elabBoogieExprPure A x
+  let y <- elabBoogieExprPure A y
+  let _ <- synthInstanceQ q(LE $A)
+  return q($x <= $y)
+| `(BoogieFormula| $x:BoogieFormula && $y:BoogieFormula) => do
+  let x <- elabBoogieFormula x
+  let y <- elabBoogieFormula y
+  return q($x ∧ $y)
+| `(BoogieFormula| $x:BoogieFormula || $y:BoogieFormula) => do
+  let x <- elabBoogieFormula x
+  let y <- elabBoogieFormula y
+  return q($x ∨ $y)
+| `(BoogieFormula| $x:BoogieFormula => $y:BoogieFormula) => do
+  let x <- elabBoogieFormula x
+  let y <- elabBoogieFormula y
+  return q($x -> $y)
 | stx => throwError "elabBoogieFormula: Unknown syntax {stx}"
 
-partial def elabBoogieAssume : TSyntax `BoogieAssume -> BoogieElabM Q(Mem Unit)
+partial def elabBoogieAssume : TSyntax `BoogieAssume -> BoogieElabM Q(ITree MemEv Unit)
 | stx@`(BoogieAssume| assume $φ:BoogieFormula; ) => do
   let vars <- collectMutVarsFormula φ
   withReadMutVars vars.toList q(Unit) do
     let φ : Q(Prop) <- elabBoogieFormula φ
     let _dφ <- synthInstanceQ q(Decidable $φ) -- ! Need `Decidable`, or later: Use events
     -- have : Q(Bool) := q(@decide $φ $dφ)
-    let ret : Q(Mem Unit) := q(ITree.assume $φ)
+    let ret : Q(ITree MemEv Unit) := q(ITree.assume $φ)
     Term.addTermInfo' stx ret
     return ret
 | stx => throwError "elabBoogieAssume: Unknown syntax {stx}"
 
 /-- Creates a program which decides the truth value of each assume, returns conjunction of that. -/
-partial def elabBoogieAssume' : TSyntax `BoogieAssume -> BoogieElabM Q(Mem Bool)
+partial def elabBoogieAssume' : TSyntax `BoogieAssume -> BoogieElabM Q(ITree MemEv Bool)
 | _stx@`(BoogieAssume| assume $φ:BoogieFormula; ) => do
   let vars <- collectMutVarsFormula φ
   withReadMutVars vars.toList q(Bool) do
     let φ : Q(Prop) <- elabBoogieFormula φ
     let dφ <- synthInstanceQ q(Decidable $φ) -- ! Need `Decidable`, or later: Use events
-    let ret : Q(Mem Bool) := q(return @decide $φ $dφ)
+    let ret : Q(ITree MemEv Bool) := q(return @decide $φ $dφ)
     return ret
+    -- return q(.ret (decide $φ))
 | stx => throwError "elabBoogieAssume: Unknown syntax {stx}"
 
 
@@ -324,14 +340,14 @@ def elabBoogieVarCmds (binders: TSyntaxArray `BoogieVarCmd) : BoogieElabM (Array
     | stx => throwError "elabBoogieVarCmds: unknown syntax {stx}"
 
 mutual
-  partial def elabBoogieCommands (cmds : TSyntaxArray `BoogieCommand) : BoogieElabM Q(Mem Unit) := do
-    cmds.foldlM (fun (acc : Q(Mem Unit)) (cmd : TSyntax _) => do
-      let cmd : Q(Mem Unit) <- withRef cmd <| elabBoogieCommand cmd
+  partial def elabBoogieCommands (cmds : TSyntaxArray `BoogieCommand) : BoogieElabM Q(ITree MemEv Unit) := do
+    cmds.foldlM (fun (acc : Q(ITree MemEv Unit)) (cmd : TSyntax _) => do
+      let cmd : Q(ITree MemEv Unit) <- withRef cmd <| elabBoogieCommand cmd
       return q(.seq $acc $cmd)
-    ) q(.skip)
+    ) q(Pure.pure ())
 
   /-- Elaborates a command such as `x := 2 * y;` or `if ... { ... }` into a monadic action. -/
-  partial def elabBoogieCommand (stx : TSyntax `BoogieCommand) : BoogieElabM Q(Mem Unit) := do
+  partial def elabBoogieCommand (stx : TSyntax `BoogieCommand) : BoogieElabM Q(ITree MemEv Unit) := do
     let ret <- withRef stx (go stx)
     Term.addTermInfo' stx ret
     return ret
@@ -339,7 +355,7 @@ mutual
   | _stx@`(BoogieCommand| $x:ident := $e:BoogieExpr; ) => do
     let val <- elabBoogieExpr q(Int) e
     let xStr : String := x.getId.toString
-    let cmd : Q(Mem Unit) := q(ITree.bind $val (fun val => Mem.write $xStr val))
+    let cmd : Q(ITree MemEv Unit) := q(Bind.bind $val (fun val => Mem.write $xStr val))
     -- Term.addTermInfo' stx cmd
     return cmd
   | `(BoogieCommand| if $cond { $t* } $[else { $e* }]?) => do
@@ -358,36 +374,38 @@ mutual
   | stx => throwError "elabBoogieCommand: Unknown syntax {stx}"
 end
 
-def elabBoogieBlock : TSyntax `BoogieBlock -> BoogieElabM Q(Block)
+def elabBoogieBlock : TSyntax `BoogieBlock -> BoogieElabM EBlock
 | `(BoogieBlock| $lbl:ident : $assumes:BoogieAssume* $cmds:BoogieCommand* goto $gotos,* ; ) => do
-  let _blockId <- declareBlock lbl.getId
-  let assumes : Array Q(Mem Bool) <- assumes.mapM elabBoogieAssume'
-  let assumes : Q(Mem Bool) := assumes.foldl (fun (acc a : Q(Mem Bool)) =>
+  let lbl := lbl.getId.toString
+  let assumes : Array Q(ITree MemEv Bool) <- assumes.mapM elabBoogieAssume'
+  let assumes : Q(ITree MemEv Bool) := assumes.foldl (fun (acc a : Q(ITree MemEv Bool)) =>
     q(do
       let acc <- ($acc)
       let a <- ($a)
       return acc && a
     ))
     q(return true)
-  let body : Q(Mem Unit) <- elabBoogieCommands cmds
-  if gotos.getElems.isEmpty then throwError "Need at least one goto label (0 for `return`)."
-  let gotos : Q(List Label) <- gotos.getElems.foldlM (fun acc g => do
-    let gId : Q(Label) <- needBlock g.getId
-    return q($gId :: $acc)
-  ) q([])
-  let code : Q(ITree MemEv Labels) := q(do /- ($assumes); -/ ($body) return (⟨$gotos, by omega⟩))
-  let block : Q(Block) := q({assumes := $assumes, code := $code})
-  return block
+  let cmds : Q(ITree MemEv Unit) <- elabBoogieCommands cmds
+  let gotos : Array String := gotos.getElems.map (fun g => g.getId.toString)
+  return ⟨lbl, assumes, cmds, gotos⟩
 | `(BoogieBlock| $lbl:ident : $assumes:BoogieAssume* $cmds:BoogieCommand* return%$rtk ; ) => do
-  throwErrorAt rtk "returns not yet supported, use `goto 0;`"
+  throwErrorAt rtk "returns not yet supported, use `goto;`"
 | stx => throwError "elabBoogieBlock: Unknown syntax {stx}"
 
-def List.q {A : Q(Type)} : List Q($A) -> Q(List $A)
-| [] => q([])
-| x :: xs => let xs := q xs; q($x :: $xs)
+
+structure EBoogieProc where
+  name : String
+  /-- Amount of labels -/
+  N : Nat
+  body : Q(ITree MemEv Unit)
+
+/-- Adapter to turn `List (ITree ...)` into `Fin N -> ITree ...`, which is what `iter` expects. -/
+def selectBlock (N : Nat) (blocks : List (ITree MemEv (Fin N ⊕ Unit))) (h : blocks.length = N) (i : Fin N)
+  : ITree MemEv (Fin N ⊕ Unit)
+  := blocks[i]
 
 /-- Elaborate a boogie procedure. Returns the procedure name and its body. -/
-def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM (String × Q(Procedure))
+def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM EBoogieProc
 | `(BoogieProc| procedure $proc ( $binders,* ) $[returns ($retBinder)]? { $vars:BoogieVarCmd* $body:BoogieBlock* }) => do
   -- vars: parameters
   let binders <- binders.getElems.mapM fun (b : TSyntax _) => withRef b <| do elabBoogieVarBinder b
@@ -396,16 +414,59 @@ def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM (String × Q(Procedure))
   if let some retBinder := retBinder then
     let (retVarName, _retVarType) <- withRef retBinder <| elabBoogieVarBinder retBinder
     declareVar retVarName
-  let binders <- elabBoogieVarCmds vars
-  binders.forM fun (n, _ty) => declareVar n
+  -- vars: local procedure vars
+  let locals <- elabBoogieVarCmds vars
+  locals.forM fun (n, _ty) => declareVar n
 
-  let blocks : Array Q(Block) <- body.mapM elabBoogieBlock
-  if blocks.size = 0 then throwError "Need at least one block."
-  -- TODO: check that all block IDs have been declared
-  let blocks : Q(List Block) := List.q blocks.toList
+  let blocks : Array EBlock <- body.mapM elabBoogieBlock
+  let blocksSorted := blocks.insertionSort (fun a b => a.label < b.label)
+  if ¬ (blocksSorted.dedupSorted (eq := ⟨fun a b => a.label == b.label⟩)).size = blocks.size
+    then throwError "Duplicate block labels"
 
-  let procE : Q(Procedure) := q(⟨$blocks⟩)
-  return (proc.getId.toString, procE)
+  let blocks := blocks.toList
+  let N : Nat := blocks.length -- amount of labels -- * Here `N` is blocks.length definitionally
+  if N_0 : N = 0
+    then throwError "Need at least one block."
+  else
+    have q_N : Q(Nat) := q($N)
+    have q_N_0 : Q(¬ $q_N = 0) := sorry
+    have q_N_0 : Q(0 < $q_N) := q(by omega)
+
+    /- For each block, translate `goto A, B;` as (pseudocode):
+    ```
+    if (decide blocks["A"].assumes) then return .inl (index of blocks["A"])
+    else if (decide blocks["B"].assumes) then return .inl (index of blocks["B"])
+    else spin
+    ```
+    Recall that `.inl (block index here)` means continue execution at that block index, but `inr ()`
+    means `return;` from the boogie procedure.
+    -/
+    let f : EBlock -> Q(ITree MemEv (Fin $N ⊕ Unit)) := fun b =>
+      let brancher : Q(ITree MemEv (Fin $N ⊕ Unit)) := b.gotos.foldr (fun g brancher =>
+        if let .some g_block_idx := blocks.findIdxH? (le_refl N) (fun b => b.label == g) then -- translate string label e.g. `bb1` into block index.
+          -- | throwError "Block {b.label} goes to unknown label {g}"
+          let g_block := blocks[g_block_idx]
+          q(do if <- $(g_block.assumes) then return .inl $g_block_idx else ($brancher)) -- (!) decide the `assume`
+        else panic! s!"Block {b.label} goes to unknown label {g}"
+      ) q(spin)
+      if b.gotos.isEmpty then q(do ($b.code); return .inr ()) -- `goto;` means `return;`, don't spin in that case
+      else q(do ($b.code); ($brancher))
+
+    let blocks' : List Q(ITree MemEv (Fin $N ⊕ Unit)) := blocks.map f
+    let h_blocks' : blocks'.length = blocks.length := blocks.length_map f
+    -- let xx : SatisfiesM (fun arr => arr.size = blocks.size) (blocks.mapM f) := blocks.size_mapM f
+
+    let blocks'' : Q((xs : List (ITree MemEv (Fin $N ⊕ Unit))) ×' xs.length = $N) := List.q_len N blocks' (by omega)
+    -- let q_blocks : Q(List (ITree MemEv (Fin $N ⊕ Unit))) := q($blocks''.1)
+    -- let q_blocks_len : Q(($q_blocks).length = $N) := q($blocks''.2)
+    -- let q_blocks_notEmpty :
+    let blocks''' : Q(Fin $N -> ITree MemEv (Fin $N ⊕ Unit)) := q(selectBlock $N $blocks''.1 $blocks''.2)
+    -- let q_n_0 : Q()
+    return {
+      name := proc.getId.toString
+      N := N
+      body := q(ITree.iter (A := Fin $N) (B := Unit) $blocks''' ⟨0, sorry⟩) -- This is "just" `q_N_0`.
+    }
 | stx => throwError "elabBoogieProc: Unknown syntax {stx}"
 
 def runBoogieElab' (m : BoogieElabM A) : TermElabM (A × BoogieElab) := StateT.run m { }
@@ -419,7 +480,7 @@ def runBoogieElab  (m : BoogieElabM A) : TermElabM A := Prod.fst <$> runBoogieEl
 -/
 
 /-- A Boogie procedure, such as `procedure foo(x: int, y:int) { x := x + 10; }`.
-  Gets elaborated into `def foo : Mem Unit := ...`, so an actual executable monadic program.
+  Gets elaborated into `def foo : ITree MemEv Unit := ...`, so an actual executable monadic program.
 
   You can run it via `runBoogie foo`, which gives you a `String -> Int`.
   Then you can read individual variables with `#eval (runBoogie foo) "x"`.
@@ -427,10 +488,10 @@ def runBoogieElab  (m : BoogieElabM A) : TermElabM A := Prod.fst <$> runBoogieEl
 elab stx:BoogieProc : command => do
   Command.liftTermElabM do
     runBoogieElab do
-      let (name, body) <- elabBoogieProc stx
+      let ⟨name, _N, body⟩ <- elabBoogieProc stx
       let decl : DefinitionVal := {
         name := (<- getCurrNamespace) ++ name.toName
-        type := <- instantiateMVars q(Procedure)
+        type := q(ITree MemEv Unit)
         value := <- instantiateMVars body
         levelParams := []
         hints := .abbrev
@@ -439,10 +500,19 @@ elab stx:BoogieProc : command => do
       addDecl (.defnDecl decl)
       compileDecl (.defnDecl decl)
 
+/-- Boogie Commands -/
+elab "b{" cmds:BoogieCommand* "}" : term => runBoogieElab (elabBoogieCommands cmds)
+
+-- /-- Boogie Block. -/
+-- elab "bb{" cmds:BoogieCommand* gotos:BoogieGoto,* "}" : term =>
+--   runBoogieElab do
+--     let body <- elabBoogieCommands cmds
+--     sorry
+
 procedure foo(x: int, y: int) {
   bb0:
     x := x + 20;
-    goto bb1, bb0;
+    goto bb0, bb1;
   bb1:
     y := x + y;
     goto bb0;
@@ -450,23 +520,12 @@ procedure foo(x: int, y: int) {
 
 procedure bar(x: int) {
   bb0:
-    assume (x == x) == (2 == x);
+    assume x == 10 && x <= 10;
     x := x + 10;
     goto bb1;
   bb1:
     y := x + 10;
     goto bb0;
 }
-
--- We want to do some loop unrolling:
--- example : run [A, B, C] = run [A, D] := sorry
--- example : run [A, B, C] = A >>= rest :=
--- example : run [A, B, C] = A >>= A >>= A >>= B >>= D >>= run [ ...]
-
-example : foo = bar := by
-  rw [foo, bar]
-  sorry
-
-
 
 end Elab
