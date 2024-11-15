@@ -17,12 +17,20 @@ abbrev ifthen (c : ITree E Bool) (t : ITree E Unit) : ITree E Unit := ite c t sk
 
 def while_ (c : ITree E Bool) (body : ITree E Unit) : ITree E Unit :=
   ITree.iter
-    (fun () => do
-      if <- c
-        then body; return .inl ()
-        else return .inr ()
+    (fun () => ite c
+        (do body; return .inl ())
+        (return .inr ())
     )
     ()
+
+-- def while_ (c : ITree E Bool) (body : ITree E Unit) : ITree E Unit :=
+--   ITree.iter
+--     (fun () => do
+--       if <- c
+--         then body; return .inl ()
+--         else return .inr ()
+--     )
+--     ()
 
 theorem while_unroll1 : while_ c f ~~ (do if <- c then f; while_ c f else return ()) := by sorry
 theorem while_unroll1' : while_ c f ~~ ITree.ite c (do f; while_ c f) skip := by sorry

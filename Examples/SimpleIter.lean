@@ -19,7 +19,7 @@ set_option pp.fieldNotation.generalized false
 
 def p1 : ITree MemEv Unit := do
   Mem.write "i" 0
-  while_ (return (<- Mem.read "i") < 3) do
+  while_ (Mem.read "i" >>= (fun i => return i < 3)) do
     Mem.update "i" (. + 1)
     Mem.update "x" (. + 2)
   Mem.write "i" 0 -- need to set `i` to 0 afterwards, otherwise the programs compute the same `x` but not `i`.
@@ -34,14 +34,21 @@ def p2 : ITree MemEv Unit := do
 example : EuttB (interp p1) (interp p2) := by
   rw [p1, p2]
   -- 1. unroll loops
-  conv => lhs; rw [Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1]
-  conv => rhs; rw [Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1, Eutt.eq while_unroll1]
+  conv =>
+    lhs
+    rw [while_unroll1'.eq]
+    rw [while_unroll1'.eq]
+    rw [while_unroll1'.eq]
+    rw [while_unroll1'.eq]
+    rw [while_unroll1'.eq]
+  conv => rhs; rw [while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq]
+  simp [ITree.ite]
 
   -- 2. Push `interp` inwards as far as possible,
   -- this will change `ITree.{pure, bind, iter, ite, read, write}`
   -- into `Boog.{pure, bind, iter, ite, read, write}`
   simp [EuttB.eq interp_bind, EuttB.eq interp_write, EuttB.eq interp_ite, EuttB.eq interp_pure,
-    Mem.update, EuttB.eq interp_write, EuttB.eq interp_read, skip]
+    Mem.update, EuttB.eq interp_write, EuttB.eq interp_read, skip, ITree.ite]
   -- Our goal is now of form `b1 b2 : (S -> ITree ∅ (A × S)) ⊢ ∀σ:S, Eutt (b1 σ) (b2 σ)`, with the predominant `bind` being `Boog.bind`.
 
   -- 3. Push state `σ` inwards as far as possible. This allows us to apply `pure_bind` and obtain

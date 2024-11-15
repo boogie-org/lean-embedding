@@ -59,7 +59,6 @@ procedure p2(x: int) {
 }
 
 -- For our boogie programs, `A` will usually be the label, and `B` will be `Unit`.
--- This makes sense, but is very ugly...
 theorem iter_fp {f : A -> ITree E (A ⊕ B)}
   : iter f a
   ~~ f a >>= (match . with | .inl a => iter f a | .inr b => return b)
