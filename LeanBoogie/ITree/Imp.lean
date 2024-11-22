@@ -8,7 +8,6 @@ namespace ITree
 /- # Convenience functions for writing imperative programs -/
 
 def skip : ITree E Unit := Pure.pure ()
-def spin : ITree E A := corec (fun n => .tau n) 0
 def seq (a b : ITree E Unit) : ITree E Unit := Bind.bind a (fun () => b)
 instance : Seqi (ITree E Unit) := ⟨ITree.seq⟩
 def trigger (e : E) : ITree E Int := .vis e .ret

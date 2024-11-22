@@ -106,6 +106,8 @@ def cases {E A : Type} {motive : ITree E A → Sort u}
         simpa [MvQPF.Cofix.mk_dest] using h
       h ▸ vis e k
 
+def spin : ITree E A := corec (fun n => .tau n) 0
+
 /-- Execute a finite amount of steps of a potentially infinite
   Returns the events encountered along the way (if any), and the final state (if any).
   Uses `f` to determine the answer to events. -/
@@ -207,6 +209,9 @@ def iter (body : A -> ITree E (A ⊕ B)) (a₀ : A) : ITree E B := sorry
       end) (inr a).
 -/
 def loop (body : Sum C A -> ITree E (Sum C B)) (a : A) : ITree E B := sorry
+
+def iter_lift (body : A -> ITree E (A ⊕ B)) : (A ⊕ B) -> ITree E (A ⊕ B) :=
+  fun | .inl a => body a | .inr b => return .inr b
 
 
 -- # Experimentation:
