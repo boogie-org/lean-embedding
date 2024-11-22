@@ -2,11 +2,11 @@ import Lean
 import Std
 import Qq
 import LeanBoogie.ITree
-import LeanBoogie.Boog
+import LeanBoogie.Boogie
 import LeanBoogie.Mem
 import Batteries.Data.Array.Monadic
 
-namespace Boogie
+namespace LeanBoogie
 open Lean Elab Meta Qq
 open Std (HashSet HashMap)
 
