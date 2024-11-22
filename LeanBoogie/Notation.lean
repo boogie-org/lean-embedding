@@ -17,3 +17,5 @@ export Theta (θ)
 class LawfulTheta (M : (Type -> Type)) [m : Monad M] (W : outParam (Type -> Type)) [w : Monad W] [Theta M W] : Prop where
   θ_pure : θ (m.pure a) = w.pure a
   θ_bind : θ (m.bind a b) = w.bind (θ a) (fun a => θ (b a))
+
+export LawfulTheta (θ_pure θ_bind)

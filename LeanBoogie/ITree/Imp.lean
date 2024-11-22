@@ -31,8 +31,8 @@ def while_ (c : ITree E Bool) (body : ITree E Unit) : ITree E Unit :=
 --     )
 --     ()
 
-theorem while_unroll1 : while_ c f ~~ (do if <- c then f; while_ c f else return ()) := by sorry
-theorem while_unroll1' : while_ c f ~~ ITree.ite c (do f; while_ c f) skip := by sorry
+theorem while_unroll1 : while_ c f = (do if <- c then f; while_ c f else return ()) := by sorry
+theorem while_unroll1' : while_ c f = ITree.ite c (do f; while_ c f) skip := by sorry
 
 /-- Decide the proposition, spin forever if false. -/
 def assume (φ : Prop) [Decidable φ] : ITree E Unit := if φ then skip else spin

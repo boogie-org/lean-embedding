@@ -23,56 +23,57 @@ instance : EmptyCollection BoogieState := ⟨fun _ => 0⟩
 
 
 /-- State monad during execution of boogie programs. Assigns values to every variable. -/
-abbrev Boogie (E : Type) : Type -> Type := StateT BoogieState (ITree E)
+abbrev Boogie : Type -> Type := StateT BoogieState (ITree Empty)
 
-def Boogie.read (v : String) : Boogie E Int := fun σ => pure (σ v, σ)
-def Boogie.write (v : String) (val : Int) : Boogie E Unit := fun σ => pure ((), BoogieState.update v val σ)
+def Boogie.read (v : String) : Boogie Int := fun σ => pure (σ v, σ)
+def Boogie.write (v : String) (val : Int) : Boogie Unit := fun σ => pure ((), BoogieState.update v val σ)
 /-- Apply a pure function to a variable. Useful for simple operations such as increments, setting to zero, etc. -/
-def Boogie.update (v : String) (f : Int -> Int) : Boogie E Unit
+def Boogie.update (v : String) (f : Int -> Int) : Boogie Unit
   := Boogie.read v >>= fun x => Boogie.write v (f x)
 
 
 /- ## Helpers for writing imperative programs.  -/
 
-def Boogie.iter (f : A -> Boogie E (A ⊕ B)) : A -> Boogie E B := sorry
-instance : Iter (Boogie E) := ⟨Boogie.iter⟩
+def Boogie.iter (f : A -> Boogie (A ⊕ B)) : A -> Boogie B := sorry
+instance : Iter Boogie := ⟨Boogie.iter⟩
 
-def Boogie.skip : Boogie E Unit := pure ()
-def Boogie.seq (a b : Boogie E Unit) : Boogie E Unit := a >>= (fun () => b)
-instance : Seqi (Boogie E Unit) := ⟨Boogie.seq⟩
+def Boogie.skip : Boogie Unit := pure ()
+def Boogie.seq (a b : Boogie Unit) : Boogie Unit := a >>= (fun () => b)
+instance : Seqi (Boogie Unit) := ⟨Boogie.seq⟩
 
-def Boogie.case (t e : Boogie E A) : Bool -> Boogie E A
+def Boogie.case (t e : Boogie A) : Bool -> Boogie A
 | true => t
 | false => e
 
-def Boogie.ite (c : Boogie E Bool) (t e : Boogie E A) : Boogie E A :=
+def Boogie.ite (c : Boogie Bool) (t e : Boogie A) : Boogie A :=
   c >>= Boogie.case t e
 
-abbrev Boogie.pure : A -> Boogie E A := Pure.pure
-abbrev Boogie.bind : (Boogie E A) -> (A -> Boogie E B) -> Boogie E B := Bind.bind
+abbrev Boogie.pure : A -> Boogie A := Pure.pure
+abbrev Boogie.bind : (Boogie A) -> (A -> Boogie B) -> Boogie B := Bind.bind
 
 /-- Actually execute a boogie program, starting with every variable being 0-initialized. -/
-def Boogie.run (m : Boogie Empty Unit) (fuel : Nat) : Option BoogieState :=
+def Boogie.run (m : Boogie Unit) (fuel : Nat) : Option BoogieState :=
   let s₀ : BoogieState := (fun _ => 0)
   let stuff := StateT.run m s₀
   let ⟨_, ret⟩ := ITree.run stuff Empty.elim fuel
   ret.map Prod.snd
 
 /-- Equivalence up-to-tau, but adapted for the `Boogie` monad. -/
-def EuttB (b1 : Boogie E A) (b2 : Boogie E A) : Prop := ∀σ : BoogieState, Eutt (b1 σ) (b2 σ)
+def EuttB (b1 : Boogie A) (b2 : Boogie A) : Prop := ∀σ : BoogieState, Eutt (b1 σ) (b2 σ)
 infixr:20 " ~=~ " => EuttB
 
-axiom EuttB.eq {E A : Type} {x y : Boogie E A} : EuttB x y -> x = y
+-- axiom EuttB.eq {E A : Type} {x y : Boogie A} : EuttB x y -> x = y
+axiom EuttB.eq {E A : Type} {x y : Boogie A} : @EuttB A = @Eq (Boogie A)
 
-theorem Boogie.ite_push_state [Decidable c] {t e : Boogie E A}
+theorem Boogie.ite_push_state [Decidable c] {t e : Boogie A}
   : (if c then t else e) σ ~~ (if c then t σ else e σ)
   := by split; repeat exact Eutt.refl _
 
-theorem Boogie.bind_push_state {a : Boogie E A} {b : A -> Boogie E B}
+theorem Boogie.bind_push_state {a : Boogie A} {b : A -> Boogie B}
   : (a >>= b) σ ~~ (a σ >>= fun res => b res.fst res.snd)
   := sorry
 
-def Boogie.while_ (c : Boogie E Bool) (body : Boogie E Unit) : Boogie E Unit :=
+def Boogie.while_ (c : Boogie Bool) (body : Boogie Unit) : Boogie Unit :=
   Boogie.iter
     (fun () => Boogie.ite c
       (do body; return .inl ())
