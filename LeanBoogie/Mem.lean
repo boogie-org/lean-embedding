@@ -1,9 +1,9 @@
 import LeanBoogie.ITree
-import LeanBoogie.Boog
+import LeanBoogie.Boogie
 import LeanBoogie.Notation
 import LeanBoogie.Util
 
-namespace Boogie
+namespace LeanBoogie
 
 /-
   # Memory effect
@@ -30,7 +30,7 @@ def Mem.update (v : String) (f : Int -> Int) : ITree MemEv Unit
 -/
 
 /-- Transforms memory events into state monad actions. -/
-def interp (tm : ITree MemEv A) : Boog Empty A := fun s₀ =>
+def interp (tm : ITree MemEv A) : Boogie Empty A := fun s₀ =>
   ITree.corec (fun ⟨tm, s⟩ =>
     match tm.dest with
     | .ret a => .ret (a, s)
@@ -57,16 +57,16 @@ theorem interp_bind_pull {ta : ITree MemEv A} {tb : A -> ITree MemEv B}
 
 
 theorem interp_iter {body : A -> ITree MemEv (A ⊕ B)} {a₀ : A}
-  : interp (ITree.iter body a₀) ~=~ Boog.iter (fun (a : A) => interp (body a)) a₀
+  : interp (ITree.iter body a₀) ~=~ Boogie.iter (fun (a : A) => interp (body a)) a₀
   := sorry!
 
 -- theorem interpk_iter {body : A -> ITree MemEv (A ⊕ B)} {a₀ : A}
---   -- : ∀a, ∀s, interpk (ITree.iter body) a s ~~ Boog.iter (interpk body) a s
---   : interpk (ITree.iter body) ~~=~~ Boog.iter (interpk body)
+--   -- : ∀a, ∀s, interpk (ITree.iter body) a s ~~ Boogie.iter (interpk body) a s
+--   : interpk (ITree.iter body) ~~=~~ Boogie.iter (interpk body)
 --   := by sorry
 
-theorem interp_read : interp (Mem.read x) ~=~ Boog.read x := sorry!
-theorem interp_write : interp (Mem.write x val) ~=~ (Boog.write x val) := sorry!
+theorem interp_read : interp (Mem.read x) ~=~ Boogie.read x := sorry!
+theorem interp_write : interp (Mem.write x val) ~=~ (Boogie.write x val) := sorry!
 
 theorem interp_ite [Decidable φ] : interp (if φ then t else e) ~=~ (if φ then interp t else interp e) := sorry!
 
