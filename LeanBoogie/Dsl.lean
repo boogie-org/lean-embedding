@@ -93,9 +93,9 @@ section Syntax
   syntax ident " := " BoogieExpr "; " : BoogieCommand
   syntax "if " BoogieExpr " { " BoogieCommand* " }" ("else" " { " BoogieCommand* " }")? : BoogieCommand
   syntax "while " BoogieExpr " { " BoogieCommand* " }" : BoogieCommand
-  -- syntax "call " BoogieIdent "(" BoogieExpr,* ")" "; " : BoogieCommand
-  -- syntax "var " BoogieVarBinder "; " : BoogieCommand
-  -- syntax "assume " BoogieFormula "; " : BoogieCommand
+  syntax "call " BoogieIdent "(" BoogieExpr,* ")" "; " : BoogieCommand
+  syntax "var " BoogieVarBinder "; " : BoogieCommand
+  syntax "assume " BoogieFormula "; " : BoogieCommand
   -- syntax "return " BoogieExpr "; " : BoogieCommand
 
   declare_syntax_cat BoogieAssume
@@ -111,11 +111,18 @@ section Syntax
   declare_syntax_cat BoogieVarCmd
   syntax "var " BoogieVarBinder "; " : BoogieVarCmd
 
+  declare_syntax_cat BoogieBlockyProc
+  syntax "blocky_procedure " ident "(" BoogieVarBinder,* ")" (" returns " "(" BoogieVarBinder ")")?
+    " { "
+      BoogieVarCmd*
+      BoogieBlock*
+    " }" : BoogieBlockyProc
+
   declare_syntax_cat BoogieProc
   syntax "procedure " ident "(" BoogieVarBinder,* ")" (" returns " "(" BoogieVarBinder ")")?
     " { "
       BoogieVarCmd*
-      BoogieBlock*
+      BoogieCommand*
     " }" : BoogieProc
 end Syntax
 
@@ -377,9 +384,13 @@ mutual
     else
       return q(ITree.ifthen $cond $t)
   | `(BoogieCommand| while $cond { $body* }) => do
-    let _cond <- withRef cond <| elabBoogieExpr q(Bool) cond
-    let _body <- elabBoogieCommands body
-    throwError "while loops not yet implemented"
+    let cond <- withRef cond <| elabBoogieExpr q(Bool) cond
+    let body <- elabBoogieCommands body
+    return q(while_ $cond $body)
+  -- | `(BoogieCommand| var $v:ident : $ty:BoogieType; ) => do
+  --   -- let cond <- withRef cond <| elabBoogieExpr q(Bool) cond
+  --   -- let body <- elabBoogieCommands body
+  --   return q(while_ $cond $body)
   | stx => throwError "elabBoogieCommand: Unknown syntax {stx}"
 end
 
@@ -402,7 +413,7 @@ def elabBoogieBlock : TSyntax `BoogieBlock -> BoogieElabM EBlock
 | stx => throwError "elabBoogieBlock: Unknown syntax {stx}"
 
 
-structure EBoogieProc where
+structure EBoogieBlockyProc where
   name : String
   /-- Amount of labels -/
   N : Nat
@@ -414,8 +425,8 @@ def selectBlock (N : Nat) (blocks : List (ITree MemEv (Fin N ⊕ Unit))) (h : bl
   := blocks[i]
 
 /-- Elaborate a boogie procedure. Returns the procedure name and its body. -/
-def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM EBoogieProc
-| `(BoogieProc| procedure $proc ( $binders,* ) $[returns ($retBinder)]? { $vars:BoogieVarCmd* $body:BoogieBlock* }) => do
+def elabBoogieBlockyProc : TSyntax `BoogieBlockyProc -> BoogieElabM EBoogieBlockyProc
+| `(BoogieBlockyProc| blocky_procedure $proc ( $binders,* ) $[returns ($retBinder)]? { $vars:BoogieVarCmd* $body:BoogieBlock* }) => do
   -- vars: parameters
   let binders <- binders.getElems.mapM fun (b : TSyntax _) => withRef b <| do elabBoogieVarBinder b
   binders.forM fun (n, _ty) => declareVar n
@@ -438,8 +449,8 @@ def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM EBoogieProc
     then throwError "Need at least one block."
   else
     have q_N : Q(Nat) := q($N)
-    have q_N_0 : Q(¬ $q_N = 0) := sorry
-    have q_N_0 : Q(0 < $q_N) := q(by omega)
+    -- have q_N_0 : Q(¬ $q_N = 0) := sorry
+    -- have q_N_0 : Q(0 < $q_N) := q(by omega)
 
     /- For each block, translate `goto A, B;` as (pseudocode):
     ```
@@ -481,6 +492,30 @@ def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM EBoogieProc
 def runBoogieElab' (m : BoogieElabM A) : TermElabM (A × BoogieElab) := StateT.run m { }
 def runBoogieElab  (m : BoogieElabM A) : TermElabM A := Prod.fst <$> runBoogieElab' m
 
+structure EBoogieProc where
+  name : Name
+  -- Args : List Q(Type)
+  -- R : Q(Type)
+  body : Q(ITree MemEv Unit)
+
+/-- Elaborate a boogie procedure. Returns the procedure name and its body. -/
+def elabBoogieProc : TSyntax `BoogieProc -> BoogieElabM EBoogieProc
+| `(BoogieProc| procedure $proc ( $binders,* ) $[returns ($retBinder)]? { $vars:BoogieVarCmd* $cmds:BoogieCommand* }) => do
+  -- vars: parameters
+  let binders <- binders.getElems.mapM fun (b : TSyntax _) => withRef b <| do elabBoogieVarBinder b
+  binders.forM fun (n, _ty) => declareVar n
+  -- vars: ret var
+  if let some retBinder := retBinder then
+    let (retVarName, _retVarType) <- withRef retBinder <| elabBoogieVarBinder retBinder
+    declareVar retVarName
+  -- vars: local procedure vars
+  let locals <- elabBoogieVarCmds vars
+  locals.forM fun (n, _ty) => declareVar n
+
+  let cmds <- elabBoogieCommands cmds
+  return { name := proc.getId, body := cmds }
+| stx => throwError "elabBoogieProc: Unknown syntax {stx}"
+
 /-
   ## Embedding Boogie syntax into Lean syntax.
   The star of the show.
@@ -494,12 +529,27 @@ def runBoogieElab  (m : BoogieElabM A) : TermElabM A := Prod.fst <$> runBoogieEl
   You can run it via `runBoogie foo`, which gives you a `String -> Int`.
   Then you can read individual variables with `#eval (runBoogie foo) "x"`.
 -/
+elab stx:BoogieBlockyProc : command => do
+  Command.liftTermElabM do
+    runBoogieElab do
+      let ⟨name, _N, body⟩ <- elabBoogieBlockyProc stx
+      let decl : DefinitionVal := {
+        name := (<- getCurrNamespace) ++ name.toName
+        type := q(ITree MemEv Unit)
+        value := <- instantiateMVars body
+        levelParams := []
+        hints := .abbrev
+        safety := .safe
+      }
+      addDecl (.defnDecl decl)
+      compileDecl (.defnDecl decl)
+
 elab stx:BoogieProc : command => do
   Command.liftTermElabM do
     runBoogieElab do
-      let ⟨name, _N, body⟩ <- elabBoogieProc stx
+      let ⟨name, body⟩ <- elabBoogieProc stx
       let decl : DefinitionVal := {
-        name := (<- getCurrNamespace) ++ name.toName
+        name := (<- getCurrNamespace) ++ name
         type := q(ITree MemEv Unit)
         value := <- instantiateMVars body
         levelParams := []
@@ -518,7 +568,7 @@ elab "b{" cmds:BoogieCommand* "}" : term => runBoogieElab (elabBoogieCommands cm
 --     let body <- elabBoogieCommands cmds
 --     sorry
 
-procedure foo(x: int, y: int) {
+blocky_procedure foo(x: int, y: int) {
   bb0:
     x := x + 20;
     goto bb0, bb1;
@@ -527,7 +577,7 @@ procedure foo(x: int, y: int) {
     goto bb0;
 }
 
-procedure bar(x: int) {
+blocky_procedure bar(x: int) {
   bb0:
     assume x == 10 && x <= 10;
     x := x + 10;
@@ -536,5 +586,27 @@ procedure bar(x: int) {
     y := x + 10;
     goto bb0;
 }
+
+#print bar
+
+procedure baz(i: int) {
+  i := 0;
+  while 0==0 {
+    i := i + 1;
+  }
+}
+#print baz
+
+procedure sum(n: int) returns (s: int) {
+  var i: int;
+  i := 0;
+  s := 0;
+  while (i <= n) {
+    i := i + 1;
+    s := s + i;
+  }
+}
+
+#print sum
 
 end Elab
