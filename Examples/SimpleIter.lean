@@ -1,11 +1,11 @@
 -- import LeanBoogie.BoogieDsl
 import LeanBoogie.ITree
-import LeanBoogie.Boog
+import LeanBoogie.Boogie
 import LeanBoogie.Mem
 import Auto
 import Aesop
 
-open Boogie ITree
+open LeanBoogie ITree
 
 set_option auto.smt true
 set_option trace.auto.smt.printCommands true
@@ -31,41 +31,45 @@ def p2 : ITree MemEv Unit := do
     Mem.update "i" (. + 1)
   Mem.write "i" 0
 
-example : EuttB (interp p1) (interp p2) := by
+example : (interp p1) = (interp p2)  := by
   rw [p1, p2]
   -- 1. unroll loops
   conv =>
     lhs
-    rw [while_unroll1'.eq]
-    rw [while_unroll1'.eq]
-    rw [while_unroll1'.eq]
-    rw [while_unroll1'.eq]
-    rw [while_unroll1'.eq]
-  conv => rhs; rw [while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq, while_unroll1'.eq]
+    rw [while_unroll1']
+    rw [while_unroll1']
+    rw [while_unroll1']
+    rw [while_unroll1']
+    rw [while_unroll1']
+  conv => rhs; rw [while_unroll1', while_unroll1', while_unroll1', while_unroll1', while_unroll1', while_unroll1', while_unroll1', while_unroll1']
   simp [ITree.ite]
 
   -- 2. Push `interp` inwards as far as possible,
   -- this will change `ITree.{pure, bind, iter, ite, read, write}`
   -- into `Boog.{pure, bind, iter, ite, read, write}`
-  simp [EuttB.eq interp_bind, EuttB.eq interp_write, EuttB.eq interp_ite, EuttB.eq interp_pure,
-    Mem.update, EuttB.eq interp_write, EuttB.eq interp_read, skip, ITree.ite]
-  -- Our goal is now of form `b1 b2 : (S -> ITree ∅ (A × S)) ⊢ ∀σ:S, Eutt (b1 σ) (b2 σ)`, with the predominant `bind` being `Boog.bind`.
+  simp [interp_bind, interp_write, interp_ite, interp_pure,
+    Mem.update, interp_write, interp_read, skip, ITree.ite]
+  -- Our goal is now of form `b1 b2 : (S -> ITree ∅ (A × S)) ⊢ ∀σ:S, (b1 σ) (b2 σ)`, with the predominant `bind` being `Boog.bind`.
 
   -- 3. Push state `σ` inwards as far as possible. This allows us to apply `pure_bind` and obtain
   -- a pure state transition function, because we no longer have any relevant coinduction.
   -- Nonetheless, this causes the predominant `bind` to become `ITree.bind` yet again (`Boog.read v : Boog ..`, but `Boog.read v σ : ITree ..`).
   -- However, we know that `ITree.bind (Boog.read v σ) k` is actually `ITree.bind (ITree.pure (σ v, σ)) k`, which simplifies to `k (σ v) σ` via `pure_bind`. Similar for `.write`.
-  intro σ
-  simp only [Eutt.eq Boog.bind_push_state, Eutt.eq Boog.ite_push_state]
-  simp only [Boog.read, Boog.write, BoogieState.update.eq_unfold]
+  ext σ
+  unfold StateT.run
+  simp only [Boogie.bind_push_state, Boogie.ite_push_state]
+  simp only [Boogie.read, Boogie.write, BoogieState.update.eq_unfold]
   simp only [pure_bind, Nat.ofNat_pos, dite_eq_ite, ↓reduceDIte, ↓reduceIte, String.reduceEq, zero_add, Nat.one_lt_ofNat, Int.reduceAdd, Int.reduceLT, lt_self_iff_false]
   simp_all only [↓reduceIte]
 
   dsimp [Pure.pure, ITree.pure]
+  /-
+  ret ((), fun v' => if v' = "i" then 0 else if v' = "x" then σ "x" + 2 + 2 + 2 else σ v') =
+  ret ((), fun v' => if v' = "i" then 0 else if v' = "x" then σ "x" + 1 + 1 + 1 + 1 + 1 + 1 else σ v')
+  -/
+
   -- Our goal is now of form `σ : S ⊢ .ret (a, f σ) = .ret (b, g σ)`
-  apply Eutt.ret_congr
-  congr 1
-  unfold BoogieState at σ
-  unfold BoogieState
+  congr 2
+  unfold BoogieState at *
   -- 4. Solve by auto :)
   auto

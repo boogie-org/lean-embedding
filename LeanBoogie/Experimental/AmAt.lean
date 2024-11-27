@@ -1,7 +1,7 @@
 import LeanBoogie.ITree
 import LeanBoogie.ITree.ITree0W
 
-open ITree
+open LeanBoogie ITree
 
 /-- `Assume` effect. You can write programs such as the following, where you obtain a proof of
   the proposition you're assuming.
@@ -25,13 +25,6 @@ open ITree
   | ...
   ```
 
-  If you instead try to observe this into a Dijkstra monad, you kind of fail at first
-  ```
-  def θ : ITree Am A -> ITree0W A :=
-    fun (post : ITree0 A -> Prop) =>
-      (prf : P???) × post ???
-  ```
-
   *Key insight*: Both the dijkstra monad and the powerset non-deterministic interpretation describe
     a set of possible computations. Is it the same notion? Only difference is that dijkstra monad
     also is a predicate transformer.
@@ -40,10 +33,10 @@ open ITree
   it is unknown whether we can write down `ITreeW`. One solution is to interpret e.g. memory effects
   away before interpreting away `Am`.
   ```
-  def interp_or_θ : ITree (Am + E) A -> ITree0W A :=
+  def interp : ITree Am A -> ITree0W A :=
   | .vis (.assume P) k =>
     fun (post : ITree Empty A -> Prop) =>
-      (prf : P) -> post (interp_or_θ (k prf))
+      (prf : P) -> interp (k prf) post
   | ...
   ```
 
@@ -56,31 +49,18 @@ open ITree
   ```
   Then you get something like a `ITreeW Mem A` or an `ITree0W A`, but no more `Choose` and `Am`:
   ```
-  interp_or_θ myprog = (fun s post => ??)
+  interp myprog = (fun s post => ??)
   ```
 -/
-inductive Am : Type
-| assume : (P : Prop) -> Am
-
-/-- `Assert` effect. You can write programs such as:
-  ```
-  .vis (.read "i") fun (i : Int) =>
-    .vis (.assert (i < 123)) fun () =>
-      ...
-  ```
-
-  If you interpret this into a nondeterminism monad...
-  ```
-  def interp : ITree (At + E) A -> Pow (ITree E A)
-  | .vis (.assert P) k => { t : ITree E A | t = k ()  ∧  ??? }
-  | ...
-  ```
--/
-inductive At : Type
-| assert : (P : Prop) -> At
-
 inductive AmAt : Type
 | assume : (P : Prop) -> AmAt
 | assert : (P : Prop) -> AmAt
 
--- def interp : ITree AmAt A -> ITree0W A
+def interp : ITree AmAt A -> ITree0W A := sorry
+
+theorem interp_assume : interp (.vis (.assume P) k) = ⟨fun post => P -> (interp (k default)).1 post, sorry⟩ := sorry
+theorem interp_assert : interp (.vis (.assert P) k) = ⟨fun post => P /\ (interp (k default)).1 post, sorry⟩ := sorry
+
+-- To generate executable code, we ignore AmAt entirely. If we can't decide an assume/assert to be true, we crash.
+-- interpX : ITree (Mem + AmAt) A -> ITree Mem (Option A)
+-- interpV : ITree (Mem + AmAt) A -> ITree0W A

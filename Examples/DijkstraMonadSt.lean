@@ -246,8 +246,39 @@ namespace Example3
   theorem good_approach : θ (f x) <= θ (g x) := by
     simp [f, g] at *
     simp [θ_pure, θ_bind, θ_read, θ_write, θ_if] at *
-    simp [StW.write.eq_unfold, StW.read.eq_unfold, StW.pure.eq_unfold, Pure.pure, Bind.bind, StW.bind.eq_unfold, StW.pure.eq_unfold] at *
-    intro rhs_post s rhs_post_h
+    simp [StW.write.eq_unfold, StW.read.eq_unfold] at *
+    dsimp [Pure.pure, Bind.bind]
+    rw [StW.bind.eq_unfold]
+    simp [Pure.pure, Bind.bind, StW.bind.eq_unfold, StW.pure.eq_unfold] at *
+    intro post s rhs_post_h
+    -- revert post s rhs_post_h
     have : x + x = 2 * x := by omega
     simp only [this, Int.add_assoc, rhs_post_h]
+
+  def fW (x : Int) : StW Unit :=
+    fun (Post : _ -> Prop) =>
+      fun s => Post ((), s + 2 * x)
+
+  example (wa : StW A) (wb : A -> StW B) (post) : StW.bind wa wb post = sorry := by
+    rw [StW.bind.eq_unfold]
+    simp
+    sorry
+
+  example : θ (f x) <= fW x := by
+    unfold f fW
+    intro post s h
+    simp [θ_pure, θ_bind, θ_read, θ_write, θ_if] at *
+    simp [StW.write.eq_unfold, StW.read.eq_unfold] at *
+    dsimp [Pure.pure, Bind.bind]
+    rw [StW.bind.eq_unfold]
+    simp [Pure.pure, Bind.bind, StW.bind.eq_unfold, StW.pure.eq_unfold] at *
+    sorry
+
+  /-- Given postcondition, compute wp. -/
+  example : fW 10 (fun ⟨(), s'⟩ => s' < 0) = (fun s => s < -20) := by
+    unfold fW
+    simp
+    ext s
+    unfold S at *
+    omega
 end Example3
