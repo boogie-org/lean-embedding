@@ -42,8 +42,8 @@ def interp (tm : ITree MemEv A) : Boogie A := fun s₀ =>
 -- def interpk (k : KTree MemEv A B) : Book Empty A B := fun a => interp (k a)
 
 
-theorem interp_pure : interp (pure x) ~=~ pure x := sorry!
-theorem interp_ret : interp (.ret x) ~=~ pure x := interp_pure
+theorem interp_pure : interp (pure x) = pure x := sorry!
+theorem interp_ret : interp (.ret x) = pure x := interp_pure
 
 theorem interp_bind {ta : ITree MemEv A} {tb : A -> ITree MemEv B}
   : interp (ta >>= tb) = (interp ta) >>= (fun a => interp (tb a))

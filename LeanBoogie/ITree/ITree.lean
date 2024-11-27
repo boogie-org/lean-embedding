@@ -106,7 +106,12 @@ def cases {E A : Type} {motive : ITree E A → Sort u}
         simpa [MvQPF.Cofix.mk_dest] using h
       h ▸ vis e k
 
-def spin : ITree E A := corec (fun n => .tau n) 0
+-- Computation rules
+theorem cases_ret : cases (motive := motive) c_ret c_tau c_vis (.ret r) = c_ret r := rfl
+theorem cases_tau : cases (motive := motive) c_ret c_tau c_vis (.tau t) = c_tau t := sorry
+theorem cases_vis : cases (motive := motive) c_ret c_tau c_vis (.vis e k) = c_vis e k := sorry
+
+def spin : ITree E A := corec (fun () => .tau ()) ()
 
 /-- Execute a finite amount of steps of a potentially infinite
   Returns the events encountered along the way (if any), and the final state (if any).

@@ -58,19 +58,13 @@ def Boogie.run (m : Boogie Unit) (fuel : Nat) : Option BoogieState :=
   let ⟨_, ret⟩ := ITree.run stuff Empty.elim fuel
   ret.map Prod.snd
 
-/-- Equivalence up-to-tau, but adapted for the `Boogie` monad. -/
-def EuttB (b1 : Boogie A) (b2 : Boogie A) : Prop := ∀σ : BoogieState, Eutt (b1 σ) (b2 σ)
-infixr:20 " ~=~ " => EuttB
-
--- axiom EuttB.eq {E A : Type} {x y : Boogie A} : EuttB x y -> x = y
-axiom EuttB.eq {E A : Type} {x y : Boogie A} : @EuttB A = @Eq (Boogie A)
-
 theorem Boogie.ite_push_state [Decidable c] {t e : Boogie A}
-  : (if c then t else e) σ ~~ (if c then t σ else e σ)
-  := by split; repeat exact Eutt.refl _
+  : (if c then t else e) σ = (if c then t σ else e σ)
+  := sorry
+  -- := by split; repeat exact Eutt.refl _
 
 theorem Boogie.bind_push_state {a : Boogie A} {b : A -> Boogie B}
-  : (a >>= b) σ ~~ (a σ >>= fun res => b res.fst res.snd)
+  : (a >>= b) σ = (a σ >>= fun res => b res.fst res.snd)
   := sorry
 
 def Boogie.while_ (c : Boogie Bool) (body : Boogie Unit) : Boogie Unit :=

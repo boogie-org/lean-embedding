@@ -56,6 +56,7 @@ def Woogie.read (v : String) : Woogie Int :=
     by unfold Monotonic; aesop
   ⟩
 
+
 def Woogie.write (v : String) (a : Int) : Woogie Unit :=
   fun s => ⟨
     fun post => post (.ret ((), s.update v a)),
@@ -100,8 +101,12 @@ theorem Boogie.θ_bind {a : Boogie A} {b : A -> Boogie B}
 
 instance : LawfulTheta Boogie Woogie := ⟨Boogie.θ_pure, Boogie.θ_bind⟩
 
-theorem Woogie.θ_read : θ (Boogie.read v) = (Woogie.read v) := by sorry
-theorem Woogie.θ_write : θ (Boogie.write v x) = (Woogie.write v x) := by sorry
+theorem Woogie.θ_read : θ (Boogie.read v) = (Woogie.read v) := by
+  simp [Woogie.read.eq_unfold, Boogie.read.eq_unfold]
+  unfold θ
+  rfl
+
+theorem Woogie.θ_write : θ (Boogie.write v x) = (Woogie.write v x) := rfl
 
 theorem Woogie.θ_ite [Decidable φ] {t e : Boogie A}
   : θ (if φ then t else e)

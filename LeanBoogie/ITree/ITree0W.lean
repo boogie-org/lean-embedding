@@ -11,11 +11,8 @@ open ITree
 
 -- Corresponding computation monad: `ITree Empty`.
 abbrev ITree0 (A : Type) := ITree Empty A
-def Converges (a : A) (t : ITree0 A) : Prop := t ~~ .ret a
-def Diverges (t : ITree0 A) : Prop := t ~~ spin
-
--- /-- The predicate `P` respects equivalence up to tau. -/
--- def RespEutt (P : ITree0 A -> Prop) : Prop := ∀t1 t2 : ITree0 A, Eutt t1 t2 -> P t1 -> P t2
+def Converges (a : A) (t : ITree0 A) : Prop := t ≈ .ret a
+def Diverges (t : ITree0 A) : Prop := t ≈ spin
 
 /-- Source: https://lag47.github.io/assets/pdf/dissertation.pdf definition 9,
   and the Interaction Trees repo `PureITreeDijkstra.v` definition `monotonici`.  -/
@@ -52,14 +49,26 @@ instance : Monad ITree0W where
   bind := .bind
 instance : LawfulMonad ITree0W := sorry
 
+def ITree0W.le (w1 w2 : ITree0W A) : Prop := ∀p, w2.1 p -> w1.1 p
+instance : LE (ITree0W A) := ⟨ITree0W.le⟩
+
+/-- DM4Ever section 4.3. -/
+theorem ITree0W.bind_mono (wa₁ wa₂ : ITree0W A) (wb₁ wb₂ : A -> ITree0W B)
+  (ha : wa₁ <= wa₂)
+  (hb : ∀a, wb₁ a <= wb₂ a)
+  : (wa₁ >>= wb₁) <= (wa₂ >>= wb₂)
+  := fun post h => by
+    dsimp [LE.le, le] at ha hb
+    let ⟨wa₁, wa₁h⟩ := wa₁
+    let ⟨wa₂, wa₂h⟩ := wa₂
+    dsimp [Bind.bind, ITree0W.bind] at *
+    unfold Monotonic at *
+    sorry
 
 -- ## Morphism θ from ITree0 to ITree0W
 
 def ITree0.θ (t : ITree0 A) : ITree0W A := ⟨fun post => post t, by intro _ _ _ _; simp_all only⟩
 instance : Theta ITree0 ITree0W := ⟨ITree0.θ⟩
-
-def ITree0W.le (w1 w2 : ITree0W A) : Prop := ∀p, w2.1 p -> w1.1 p
-instance : LE (ITree0W A) := ⟨ITree0W.le⟩
 
 theorem ITree0.θ_pure : θ (return a) = return a := rfl
 theorem ITree0.θ_bind {a : ITree0 A} {b : A -> ITree0 B}
@@ -72,7 +81,7 @@ theorem ITree0.θ_bind {a : ITree0 A} {b : A -> ITree0 B}
 instance : LawfulTheta ITree0 ITree0W := ⟨ITree0.θ_pure, ITree0.θ_bind⟩
 
 theorem θ_if {t e : ITree0 A} [Decidable c] : θ (if c then t else e) = if c then θ t else θ e := by
-  sorry
+  aesop
 
 
 -- ## Specs for Iter

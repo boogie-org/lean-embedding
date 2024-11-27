@@ -14,8 +14,6 @@ inductive Eutt (x y : ITree E A) : Prop where
   (h_fixpoint : ∀a b, R a b → EuttF R a b)
   (h_R : R x y)
 
-infixr:20 " ~~ " => Eutt
-
 theorem Eutt.refl (x : ITree E A) : Eutt x x := by
   apply Eutt.intro (R := (· = ·))
   · rintro a b rfl
@@ -55,15 +53,21 @@ theorem Eutt.trans {x y z : ITree E A} : Eutt x y → Eutt y z → Eutt x z := b
     case taur t => sorry
   · exact ⟨y, h_R₁, h_R₂⟩
 
-theorem Eutt.ret : @Eutt E A (.ret r) (.ret r) := Eutt.refl _
+instance ITree.setoid : Setoid (ITree E A) where
+  r := Eutt
+  iseqv := ⟨Eutt.refl, Eutt.symm, Eutt.trans⟩
 
-theorem Eutt.ret_congr (h : a = b) : Eutt (E := E) (.ret a) (.ret b) := h ▸ Eutt.refl _
+instance Internal.ITree.setoid : Setoid (Internal.ITree Ans E A) := _root_.ITree.setoid -- typeclass resolution isn't able to figure this out on its own...
+
+theorem Eutt.ret : @ITree.ret E A r ≈ .ret r := Eutt.refl _
+
+theorem Eutt.ret_congr {a b : A} (h : a = b) : @ITree.ret E A a ≈ .ret b := h ▸ Eutt.refl _
 
 inductive Rel : ITree E A -> ITree E A -> Prop
 | refl : Rel t t
 | taur : Rel t (.tau t)
 
-theorem Eutt.taur {t : ITree E A} : Eutt t (.tau t) := by
+theorem Eutt.taur {t : ITree E A} : t ≈ t.tau := by
   let R (x y : ITree E A) : Prop := Rel x y
   have hFix (a b : ITree E A) (h : R a b) : EuttF R a b := by
     cases a
@@ -83,30 +87,14 @@ theorem Eutt.taur {t : ITree E A} : Eutt t (.tau t) := by
   have hR : R t (.tau t) := .taur
   exact .intro R hFix hR
 
-theorem Eutt.taul {t : ITree E A} : Eutt (.tau t) t := sorry
-theorem Eutt.tau  {t : ITree E A} : Eutt (.tau t) (.tau t) := sorry
-theorem Eutt.tau'  {t : ITree E A} : Eutt t u -> Eutt (.tau t) (.tau u) := sorry
+theorem Eutt.taul {t : ITree E A} : t.tau ≈ t := sorry
+theorem Eutt.tau  {t : ITree E A} : t.tau ≈ t.tau := sorry
+theorem Eutt.tau_congr  {t : ITree E A} : t ≈ u -> t.tau ≈ u.tau := sorry
 
-theorem Eutt.vis  {t : ITree E A} {k₁ k₂ : Ans → ITree E A} : ∀a, Eutt (k₁ a) (k₂ a) -> Eutt (.vis e k₁) (.vis e k₂) := by
+-- See page 8 of the ITree paper
+-- theorem bind_congr : Eutt t1 t2 -> EuttK k1 k2 -> Eutt (ITree.bind t1 k1) (ITree.bind t2 k2) := trustITree "page 8"
+-- theorem vis_congr : EuttK k1 k2 -> Eutt (.vis e k1) (.vis e k2) := trustITree "page 8"
+-- theorem tau_congr : Eutt t1 t2 -> Eutt (.tau t1) (.tau t2) := trustITree "page 8"
+
+theorem Eutt.vis {k₁ k₂ : Ans → ITree E A} : k₁ ≈ k₂ -> ITree.vis e k₁ ≈ .vis e k₂ := by
   sorry
-
-/-- Until we have setoid rewriting in Lean, we use this hack. -/
-axiom Eutt.eq {E A} {t1 t2 : ITree E A} : Eutt t1 t2 -> t1 = t2
-
-theorem Eutt.rw {t1 : ITree E A} {motive : (t2 : ITree E A) -> Eutt t1 t2 -> Prop} {t2 : ITree E A}
-  (prf : Eutt t1 t2)
-  : motive t1 (Eutt.refl t1) -> motive t2 prf
-  := sorry
-
-instance ITree.setoid : Setoid (ITree E A) where
-  r := Eutt
-  iseqv := ⟨Eutt.refl, Eutt.symm, Eutt.trans⟩
-
-def QITree (E A : Type) : Type := Quotient (α := ITree E A) ITree.setoid
-def QITree.ret (a : A) : QITree E A := Quotient.mk ITree.setoid (ITree.ret a)
-def QITree.tau (t : QITree E A) : QITree E A := Quotient.recOn t (fun t => Quotient.mk _ t.tau) (by
-  intro t t' h
-  have : t.tau ≈ t'.tau := Eutt.tau' h
-  simp only [eq_rec_constant]
-  exact Quotient.sound this
-)

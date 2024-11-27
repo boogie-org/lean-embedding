@@ -55,11 +55,15 @@ theorem case_split (_h₁ : inl >>> f ~~~ h) (_h₂ : inr >>> f ~~~ k) : f ~~~ c
 
 
 /-- We can unroll `iter f`. -/
-theorem iter_fp {f : KTree E A (A ⊕ B)}      : iter f  ~~~ f   >>> case (iter f) id := trustITree "page 9"
+theorem iter_fp {f : KTree E A (A ⊕ B)}      : iter f  = f   >>> case (iter f) id := trustITree "page 9"
 
-theorem iter_fp_nonK {f : A -> ITree E (A ⊕ B)} : ITree.iter f p ~~ f p >>= case (iter f) id := by sorry
+theorem iter_fp_nonK {f : A -> ITree E (A ⊕ B)} : ITree.iter f a = f a >>= case (iter f) id := by sorry
+theorem iter_fp' {f : A -> ITree E (A ⊕ B)}
+  : ITree.iter f a₀
+  = (do let ab <- f a₀; match ab with | .inl a => (iter f a) | .inr b => return b)
+  := by sorry
 
-theorem iter_comp : iter (f >>> case g inr) ~~~ f >>> case (iter (g >>> case f inr)) id := trustITree "page 9"
+theorem iter_comp : iter (f >>> case g inr) = f >>> case (iter (g >>> case f inr)) id := trustITree "page 9"
 
 /-- "Iterating f to completion, then executing g" is equivalent to iterationg "execute f, and if it wanted to complete, execute g" to completion. -/
 theorem iter_param {f : KTree E A (A ⊕ B)} {g : KTree E B C} : iter f >>> g ~~~ iter (f >>> bimap id g) := trustITree "page 9"
