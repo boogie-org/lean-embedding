@@ -1,8 +1,8 @@
 import LeanBoogie.Notation
 
 /-- The monad `M` is equipped with `iter`. -/
-class Iter (M : Type -> Type) [Monad M] where
-  iter : {A B : Type} -> (A -> M (A ⊕ B)) -> A -> M B
+class Iter (M : Type u -> Type v) [Monad M] where
+  iter : {A B : Type u} -> (A -> M (A ⊕ B)) -> A -> M B
 open Iter
 
 -- class LawfulIter (M : Type -> Type) {equiv : {A : Type} -> M A -> M A -> Prop} [Monad M] [Iter M] : Prop where

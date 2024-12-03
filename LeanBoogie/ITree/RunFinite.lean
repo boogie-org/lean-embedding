@@ -6,13 +6,13 @@ namespace ITree
 /-- Execute a finite amount of steps of a potentially infinite
   Returns the events encountered along the way (if any), and the final state (if any).
   Uses `f` to determine the answer to events. -/
-def runLog (t : ITree E A) (f : ∀Ans, E Ans -> Ans) : Nat -> (List ((Ans : Type) × E Ans)) × Option A
+def runLog (t : ITree E A) (f : ∀{Ans}, E Ans -> Ans) : Nat -> (List ((Ans : Type) × E Ans)) × Option A
 | 0 => ([], none)
 | n+1 => match t.dest with
   | .ret (.up a) => ([], some a)
   | .tau t => runLog t f n
   | .vis ⟨Ans, .up e, k⟩ => by
-    let t : ITree E A := k (.up (f _ e))
+    let t : ITree E A := k (.up (f e))
     let (evs, ret) := runLog t f n
     exact (⟨Ans, e⟩ :: evs, ret)
 

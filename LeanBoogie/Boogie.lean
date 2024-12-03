@@ -23,7 +23,7 @@ instance : EmptyCollection BoogieState := ⟨fun _ => 0⟩
 
 
 /-- State monad during execution of boogie programs. Assigns values to every variable. -/
-abbrev Boogie : Type -> Type := StateT BoogieState (ITree Empty)
+abbrev Boogie : Type -> Type 1 := StateT BoogieState (ITree 0)
 
 def Boogie.read (v : String) : Boogie Int := fun σ => pure (σ v, σ)
 def Boogie.write (v : String) (val : Int) : Boogie Unit := fun σ => pure ((), BoogieState.update v val σ)
@@ -55,7 +55,7 @@ abbrev Boogie.bind : (Boogie A) -> (A -> Boogie B) -> Boogie B := Bind.bind
 def Boogie.run (m : Boogie Unit) (fuel : Nat) : Option BoogieState :=
   let s₀ : BoogieState := (fun _ => 0)
   let stuff := StateT.run m s₀
-  let ⟨_, ret⟩ := runLog stuff Empty.elim fuel
+  let ⟨_, ret⟩ := ITree.runLog stuff PEmpty.elim fuel
   ret.map Prod.snd
 
 theorem Boogie.ite_push_state [Decidable c] {t e : Boogie A}
