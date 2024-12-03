@@ -39,7 +39,7 @@ def List.q {A : Q(Type)} : List Q($A) -> Q(List $A)
 | [] => q([])
 | x :: xs => let xs := q xs; q($x :: $xs)
 
-def List.q_len {A : Q(Type)} : (N:Nat) -> (xs : List Q($A)) -> xs.length = N -> Q((xs : List $A) ×' xs.length = $N)
+def List.q_len {A : Q(Type 1)} : (N:Nat) -> (xs : List Q($A)) -> xs.length = N -> Q((xs : List $A) ×' xs.length = $N)
 | 0, [], h => by cases h; exact q(⟨[], rfl⟩)
 | N+1, x :: xs, h => by
   let xs := q_len N xs (by rw [List.length] at h; omega)
