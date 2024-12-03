@@ -55,7 +55,7 @@ abbrev Boogie.bind : (Boogie A) -> (A -> Boogie B) -> Boogie B := Bind.bind
 def Boogie.run (m : Boogie Unit) (fuel : Nat) : Option BoogieState :=
   let s₀ : BoogieState := (fun _ => 0)
   let stuff := StateT.run m s₀
-  let ⟨_, ret⟩ := ITree.run stuff Empty.elim fuel
+  let ⟨_, ret⟩ := runLog stuff Empty.elim fuel
   ret.map Prod.snd
 
 theorem Boogie.ite_push_state [Decidable c] {t e : Boogie A}

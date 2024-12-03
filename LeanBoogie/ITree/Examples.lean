@@ -1,18 +1,17 @@
 import Qpf
 import LeanBoogie.ITree.ITree
 import LeanBoogie.ITree.Eutt
+import LeanBoogie.ITree.Events
 
 open MvQPF
 open ITree
+
 instance : Repr Empty where reprPrec _ _ := ""
 
 inductive Ev : Type
 | input  : Ev
 | output : Int -> Ev -- We would really like this to be `-> Ev Unit`, but can't due to the `(A : Type) -> ...` QPF issue.
 deriving Repr
-
-/-- Spin forever. -/
-def spin : ITree Empty Empty := ITree.corec (fun n => .tau n) 0
 
 /-- Just echo once. -/
 def echo1 : ITree Ev Unit :=

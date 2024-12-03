@@ -1,4 +1,6 @@
 import LeanBoogie.ITree.ITree
+import LeanBoogie.ITree.Monad
+import LeanBoogie.ITree.Iter
 import LeanBoogie.ITree.Eutt
 import LeanBoogie.Notation
 import LeanBoogie.Iter
@@ -10,7 +12,7 @@ namespace ITree
 def skip : ITree E Unit := Pure.pure ()
 def seq (a b : ITree E Unit) : ITree E Unit := Bind.bind a (fun () => b)
 instance : Seqi (ITree E Unit) := ⟨ITree.seq⟩
-def trigger (e : E) : ITree E Int := .vis e .ret
+-- def trigger (e : E Ans) : ITree E Int := .vis e .ret
 def ite (c : ITree E Bool) (t e : ITree E A) : ITree E A := Bind.bind c (fun c => if c then t else e)
 abbrev ifthen (c : ITree E Bool) (t : ITree E Unit) : ITree E Unit := ite c t skip
 

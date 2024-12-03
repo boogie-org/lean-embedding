@@ -57,7 +57,7 @@ instance ITree.setoid : Setoid (ITree E A) where
   r := Eutt
   iseqv := ⟨Eutt.refl, Eutt.symm, Eutt.trans⟩
 
-instance Internal.ITree.setoid : Setoid (Internal.ITree Ans E A) := _root_.ITree.setoid -- typeclass resolution isn't able to figure this out on its own...
+instance Internal.ITree.setoid : Setoid (ITree E A) := _root_.ITree.setoid -- typeclass resolution isn't able to figure this out on its own...
 
 theorem Eutt.ret : @ITree.ret E A r ≈ .ret r := Eutt.refl _
 

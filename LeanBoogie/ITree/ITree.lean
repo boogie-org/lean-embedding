@@ -1,6 +1,8 @@
 import Qpf
 import Mathlib.Data.QPF.Multivariate.Constructions.Sigma
 
+namespace ITree
+
 /-!
 # Interaction Trees
 
@@ -13,7 +15,6 @@ semantics of side-effecting, possibly non-terminating, programs
 Thank you to Alex Keizer (github.com/alexkeizer) for the help in figuring this out!
 -/
 
-namespace ITree
 
 /-
   ## Step 1: Defining Shape
@@ -201,6 +202,10 @@ abbrev vis {E : Type -> Type} {A : Type} {Ans : Type} (e : E Ans) (k : Ans -> IT
 def corec {E : Type -> Type} {A : Type} {β : Type 1} (f : β → Base E A β) (b : β) : ITree E A
   := MvQPF.Cofix.corec (n := 1) (F := Base.Uncurried E) f b
 
+def dest {E : Type -> Type} {A : Type} : ITree E A -> Base E A (ITree E A)
+  := MvQPF.Cofix.dest
+
+@[cases_eliminator, elab_as_elim]
 def cases {E : Type -> Type} {A : Type} {motive : ITree E A -> Sort u}
   (ret : (r : A) → motive (ret r))
   (tau : (x : ITree E A) → motive (tau x))
@@ -222,3 +227,34 @@ def cases {E : Type -> Type} {A : Type} {motive : ITree E A -> Sort u}
       apply_fun MvQPF.Cofix.mk at h
       simpa [MvQPF.Cofix.mk_dest] using h
     h ▸ vis e (fun ans => k (.up ans))
+
+-- Computation rules
+theorem cases_ret : cases (motive := motive) c_ret c_tau c_vis (.ret r) = c_ret r := rfl
+theorem cases_tau : cases (motive := motive) c_ret c_tau c_vis (.tau t) = c_tau t := sorry
+theorem cases_vis : cases (motive := motive) c_ret c_tau c_vis (.vis e k) = c_vis e k := sorry
+
+
+/-
+  # Some common stuff
+-/
+
+def spin : ITree E A := corec (fun .unit => .tau .unit) PUnit.unit
+
+
+/-- Just a convenience function. Re-plays a tree within another tree. -/
+def Base.replay (ta : ITree E A₁) (fTree : ITree E A₁ -> C) (fRet : A₁ -> A₂ := by exact id) : ITree.Base E A₂ C := sorry
+--   match ta.dest with
+--   | .ret (.up a : _) => .ret (.up (fRet a))
+--   | .tau (t : ITree E A₁) => .tau (fTree t)
+--   | .vis ⟨_, e, k⟩ => .vis e (fun x => fTree (k x))
+
+def _root_.TypeVec.ofList : (l : List Type) -> TypeVec l.length
+| [] => Vec.nil
+| t :: l => TypeVec.ofList l |>.append1 t
+
+def Base.Map (f : C -> D) : TypeVec.Arrow (TypeVec.ofList [C, B, E]) (TypeVec.ofList [D, B, E])
+  := TypeVec.appendFun TypeVec.id f
+
+-- TODO:
+-- def Base.Inr : TypeVec.Arrow (TypeVec.ofList [ITree E B, B, E]) (TypeVec.ofList [ITree E A ⊕ ITree E B, B, E])
+--   := TypeVec.appendFun TypeVec.id Sum.inr

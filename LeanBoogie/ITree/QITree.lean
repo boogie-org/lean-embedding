@@ -5,7 +5,7 @@ import Mathlib.Data.Quot
   # Quotient of ITree along Eutt
 -/
 
-def QITree (E A : Type) : Type := Quotient (α := ITree E A) ITree.setoid
+def QITree (E : Type -> Type) (A : Type) : Type 1 := Quotient (α := ITree E A) ITree.setoid
 def QITree.ret (a : A) : QITree E A := Quotient.mk ITree.setoid (ITree.ret a)
 def QITree.tau (t : QITree E A) : QITree E A := Quotient.liftOn t (⟦ITree.tau ·⟧) (by
   intro t t' h
@@ -14,11 +14,11 @@ def QITree.tau (t : QITree E A) : QITree E A := Quotient.liftOn t (⟦ITree.tau 
   exact Quotient.sound this
 )
 
-opaque QITree.vis_impl (e : E) (k : Ans -> QITree E A) : QITree E A := sorry
+opaque QITree.vis_impl (e : E Ans) (k : Ans -> QITree E A) : QITree E A := sorry
 
 -- https://leanprover.zulipchat.com/#narrow/channel/113488-general/topic/Quot.20lifting.20.60.28_.20-.3E.20T.29.20-.3E.20T.60.20to.20.60.28_.20-.3E.20Q.29.20-.3E.20Q.60/near/484606314
 @[implemented_by QITree.vis_impl]
-def QITree.vis (e : E) (k : Ans -> QITree E A) : QITree E A :=
+def QITree.vis (e : E Ans) (k : Ans -> QITree E A) : QITree E A :=
   Quotient.liftOn (Quotient.choice k) (⟦ITree.vis e ·⟧) (fun _ _ => Quotient.eq.mpr ∘ Eutt.vis)
 
 #check Quot.lift
@@ -31,10 +31,10 @@ example (t : QITree E A) : QITree.tau t = t := by
   sorry
 
 set_option pp.proofs true in
-def QITree.cases {E A : Type} {motive : QITree E A → Sort u}
+def QITree.cases {E : Type -> Type} {A : Type} {motive : QITree E A → Sort u}
     (c_ret : (r : A) → motive (.ret r))
     (c_tau : (x : QITree E A) → motive (.tau x))
-    (c_vis : (e : E) → (k : Ans → QITree E A) → motive (.vis e k))
+    (c_vis : {Ans : Type} -> (e : E Ans) → (k : Ans → QITree E A) → motive (.vis e k))
     (x : QITree E A)
     : motive x
     := Quotient.recOn x
@@ -78,13 +78,13 @@ def QITree.cases {E A : Type} {motive : QITree E A → Sort u}
       )
 
 set_option pp.proofs true in
-def QITree.cases_2 {E A : Type} {motive : QITree E A → Sort u}
+def QITree.cases_2 {A : Type} {motive : QITree E A → Sort u}
   (c_ret : (r : A) → motive (.ret r))
   -- (tau : (x : QITree E A) → motive (.tau x)) -- // Note: Even with quotients we can't get rid of this case. Imagine `QITree.cases (motive := False when .tau) c_ret c_vis spin : False`. Or... maybe this is okay, because we can not write that motive type in the first place, since we can't distinguish between `.ret : QITree` and `.tau _ : QITree`.
-  (c_vis : (e : E) → (k : Ans → QITree E A) → motive (.vis e k))
+  (c_vis : (e : E Ans) → (k : Ans → QITree E A) → motive (.vis e k))
   (x : QITree E A)
   : motive x
-  := Quotient.liftOn₂ (Quotient.choice)
+  := sorry -- ? Quotient.liftOn₂ (Quotient.choice)
 
 
 
