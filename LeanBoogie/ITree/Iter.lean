@@ -1,7 +1,9 @@
 import LeanBoogie.ITree.ITree
 import LeanBoogie.ITree.Monad
+import LeanBoogie.Iter
 
 namespace ITree
+open LeanBoogie
 
 /-
   ## ITrees form an *iterative* monad
@@ -37,6 +39,8 @@ def iter (body : A -> ITree E (A ⊕ B)) (a₀ : A) : ITree E B := sorry -- TODO
   --     | .vis e k => sorry
   --   | .inr b => Base.replay b .inr
   -- ) (Sum.inl a₀)
+
+instance : Iter (ITree E) := ⟨iter⟩
 
 theorem iter_fp {f : A -> ITree E (A ⊕ B)}
   : iter f a₀ = do let ab <- f a₀

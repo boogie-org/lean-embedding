@@ -1,62 +1,95 @@
 import LeanBoogie.ITree
-import LeanBoogie.Boogie
-import LeanBoogie.Notation
-import LeanBoogie.Util
+-- import LeanBoogie.Boogie
+import Mathlib.Data.Real.Basic
 
 namespace LeanBoogie
+open ITree (HasEff)
 
 /-
-  # Memory effect
+  # Memory (Effects) in Boogie
+
+  Without interpretation yet. For that, look into `State.lean`.
 -/
 
-/-- Memory events: Reading or writing of a variable. -/
-inductive MemEv : Type -> Type
-| read  : String        -> MemEv Int
-| write : String -> Int -> MemEv Unit
-deriving Repr
+-- ## Codes for boogie state types
 
--- abbrev Mem : Type -> Type := ITree MemEv
+/-- Codes for Boogie types.
 
-def Mem.read (v : String)            : ITree MemEv Int  := .vis (.read v) (fun ans => .ret ans)
-def Mem.write (a : String) (b : Int) : ITree MemEv Unit := .vis (.write a b) (fun _unit => .ret ())
-/-- Apply a pure function to a variable. Useful for simple operations such as increments, setting to zero, etc. -/
-def Mem.update (v : String) (f : Int -> Int) : ITree MemEv Unit
-  := Mem.read v >>= fun x => Mem.write v (f x)
-
-/-
-  # Interpreting memory
+  An alternative formulation would be forgo `Ty` entirely and define `def Con : Type 1 := List Type`,
+  which would allow for arbitrary types.
 -/
+inductive Ty : Type
+/-- Booleans. Interpreted as `Bool`.
+  Note: Lean has `Prop` which would make more sense to use for anything formula-related. -/
+| bool : Ty
+-- /-- Propositions? Interpreted as `Prop`. Not sure if this is a good idea. -/
+-- | prop : Ty
+/-- Unbounded integers. Interpreted as `ℤ`. -/
+| int : Ty
+/-- Real numbers. Interpreted as `ℝ`. -/
+| real : Ty
+/-- Bitvectors. Interpreted as `BitVec n`. -/
+| bv (bits : Nat) : Ty
+/-- Boogie maps. These get interpreted as function types.
 
-/-- Transforms memory events into state monad actions. -/
-def interp (tm : ITree MemEv A) : Boogie A := fun s₀ =>
-  ITree.corec (fun ⟨tm, s⟩ =>
-    match tm.dest with
-    | .ret (.up a) => .ret (.up (a, s))
-    | .tau t => .tau (t, s)
-    | .vis ⟨_, .up (.read v), k⟩ => .tau ⟨k (s v), s⟩
-    | .vis ⟨_, .up (.write v val), k⟩ => .tau ⟨k default, s.update v val⟩
-  ) (tm, s₀)
+  Note: Since Lean functions are *extensional*, so are Boogie maps in our rendition.
+  However, the [Boogie 2 spec](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/12/krml178.pdf)
+  says that maps are not extensional, due to [a Dafny issue](https://github.com/dafny-lang/dafny/issues/2463).
+  We choose to ignore this, for now. -/
+| map (A B : Ty) : Ty
+infixl:20 " ~> " => Ty.map
+
+/-- Context, assigns every variable (de-Brujin indexed) its type code.
+
+  For example, `def Γ : Con := [.int, .int ~> .int]`.
+
+  An alternative formulation of `Con` could be
+  `def Con : Type := (Names : Finset String) × (types : Names -> Ty)`.
+-/
+abbrev Con : Type := List Ty
+-- inductive Con : Type where
+-- | empty : Con
+-- | ext : Con -> Ty -> Con
+
+/-- Variables, referring to an entry in a context. This is essentially `Fin Γ.length`,
+  but also asserts that the variable at that index has type `A`, which is often nicer to deal with.  -/
+inductive Var : (Γ : Con) -> (A : Ty) -> Type
+| vz :            Var (A :: Γ) A
+| vs : Var Γ A -> Var (B :: Γ) A
+
+/-- Interprets e.g. `Ty.int` into `Int`. -/
+abbrev TyA : Ty -> Type
+| .int => Int
+| .real => Real
+| .bool => Bool
+| .bv bits => BitVec bits
+| .map A B => TyA A -> TyA B
+
+-- So that you can do e.g. `(my_int : .int) -> ...` instead of `(my_int : TyA .int) -> ...`.
+instance : CoeSort Ty Type := ⟨TyA⟩
 
 
-theorem interp_pure : interp (pure x) = pure x := sorry!
-theorem interp_ret : interp (.ret x) = pure x := interp_pure
+-- ## `Mem` Effect
 
-theorem interp_bind {ta : ITree MemEv A} {tb : A -> ITree MemEv B}
-  : interp (ta >>= tb) = (interp ta) >>= (fun a => interp (tb a))
-  := sorry!
+inductive Mem (Γ : Con) : Type -> Type where
+| rd : Var Γ A          -> Mem Γ A
+| wr : Var Γ A -> TyA A -> Mem Γ Unit
 
+def Mem.read  (v : Var Γ A)           : ITree (Mem Γ) A    := .vis (.rd v    ) .ret
+def Mem.write (v : Var Γ A) (val : A) : ITree (Mem Γ) Unit := .vis (.wr v val) .ret
 
-/-- Convenience mix of `interp_bind` and `bind_state_pull`. -/
-theorem interp_bind_pull {ta : ITree MemEv A} {tb : A -> ITree MemEv B}
-  : interp (ITree.bind ta tb) s = ITree.bind (interp ta s) (fun x => interp (tb x.1) x.2)
-  := sorry!
+def Mem.read'  (v : Var Γ A)           : ITree (E & Mem Γ) A    := .vis (Mem.rd v    ) .ret
+def Mem.write' (v : Var Γ A) (val : A) : ITree (E & Mem Γ) Unit := .vis (Mem.wr v val) .ret
 
+-- the most general form is like this, with `HasEff`:
+def Mem.read''  [HasEff (Mem Γ) E] (v : Var Γ A)           : ITree E A    := .vis (Mem.rd v    ) .ret
+def Mem.write'' [HasEff (Mem Γ) E] (v : Var Γ A) (val : A) : ITree E Unit := .vis (Mem.wr v val) .ret
 
-theorem interp_iter {body : A -> ITree MemEv (A ⊕ B)} {a₀ : A}
-  : interp (ITree.iter body a₀) = Boogie.iter (fun (a : A) => interp (body a)) a₀
-  := sorry!
+def Γ : Con := [.int]
+#synth HasEff (Mem Γ) (Mem Γ)
 
-theorem interp_read : interp (Mem.read x) = Boogie.read x := sorry!
-theorem interp_write : interp (Mem.write x val) = (Boogie.write x val) := sorry!
+example : ITree (Mem Γ) Unit := do
+  Mem.write .vz 123
+  return ()
 
-theorem interp_ite [Decidable φ] : interp (if φ then t else e) = (if φ then interp t else interp e) := sorry!
+def merge : ITree (Mem Γ & Mem Δ) A -> ITree (Mem (Γ ++ Δ)) A := sorry

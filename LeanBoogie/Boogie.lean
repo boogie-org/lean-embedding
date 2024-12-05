@@ -23,7 +23,7 @@ instance : EmptyCollection BoogieState := ⟨fun _ => 0⟩
 
 
 /-- State monad during execution of boogie programs. Assigns values to every variable. -/
-abbrev Boogie : Type -> Type 1 := StateT BoogieState (ITree 0)
+abbrev Boogie : Type -> Type 1 := StateT BoogieState (ITree ∅)
 
 def Boogie.read (v : String) : Boogie Int := fun σ => pure (σ v, σ)
 def Boogie.write (v : String) (val : Int) : Boogie Unit := fun σ => pure ((), BoogieState.update v val σ)
