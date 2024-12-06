@@ -196,10 +196,10 @@ theorem ConA.grab {Γ : Con} {γ : Γ} (v : Var Γ A) : γ = γ.set v (γ.get v)
   ## Pseudo-structures
 -/
 
-def Γ : Con := [.int, .int]
-def Stuff : Type := ConA Γ
-def Stuff.mk (i : Int) (x : Int) : Stuff := (i, x, ())
-def Stuff.i (self : Stuff) : Int := ConA.get self .v0
-def Stuff.x (self : Stuff) : Int := ConA.get self .v1
-example : (Stuff.mk i x).i = i := rfl
-example : (Stuff.mk i x).x = x := rfl
+private def Γ : Con := [.int, .int]
+private def Stuff : Type := ConA Γ
+private def Stuff.mk (i : Int) (x : Int) : Stuff := (i, x, ())
+private def Stuff.i (self : Stuff) : Int := ConA.get self .v0
+private def Stuff.x (self : Stuff) : Int := ConA.get self .v1
+private example : (Stuff.mk i x).i = i := rfl
+private example : (Stuff.mk i x).x = x := rfl
