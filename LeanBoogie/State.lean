@@ -1,5 +1,6 @@
-import LeanBoogie.Mem
+import LeanBoogie.Effect.Mem
 import LeanBoogie.Iter
+import LeanBoogie.Types
 
 namespace LeanBoogie
 
@@ -12,29 +13,10 @@ namespace LeanBoogie
   be very interesting to try.
 -/
 
+
 /-
   # The state monad
 -/
-
-/-- E.g. `ConA [.int, .bv 32] ≣ Unit × Int × BitVec 32`. -/
-abbrev ConA : Con -> Type
-| [] => Unit
-| x :: xs => TyA x × ConA xs
-
-instance : CoeSort Con Type := ⟨ConA⟩
-
-set_option linter.unusedVariables false in
-/-- Read a variable's value from the state. -/
-def ConA.get : {Γ : Con} -> Γ -> Var Γ A -> A
-| _ :: _, (x, _), .vz   => x
-| _ :: _, (_, γ), .vs v => γ.get v
-
-set_option linter.unusedVariables false in
-/-- Set a variable's value, returning an updated state.
-  Example: `γ.set v 123 : Γ`.  -/
-def ConA.set : {Γ : Con} -> Γ -> Var Γ A -> A -> Γ
-| _ :: _, (_, γ), .vz  , a' => (a', γ)
-| _ :: _, (a, γ), .vs v, a' => (a, γ.set v a')
 
 def State.read [Monad M] (v : Var Γ A) : StateT Γ M A := fun γ => return (γ.get v, γ)
 def State.write [Monad M] (v : Var Γ A) (val : A) : StateT Γ M PUnit := fun γ => return (.unit, γ.set v val)
@@ -53,34 +35,21 @@ instance [Monad M] [Iter M] : Iter (StateT Γ M) := ⟨State.iter⟩
 /-
   ## Equational reasoning for our state monad
 
-  The above `interp_*` lemmas show that `interp` is a monad morphism.
+  `interp_*` lemmas show that `interp` is a monad morphism.
   We should also show properties about the interpreted state, which we can not show on the `Mem` events.
   For example, last write wins, etc.
+
+  * A lot of theorems about how our state behaves are proven in `Types.lean`, usually named `ConA_*`.
 -/
 
-/- ### Normal form of `ConA`
-  Given a starting `γ : ConA Γ` and `γ' = γ.update |>.update .. |>.update ... |> ...`,
-  we can normalize these into essentially `γ' = { #0 := ...γ..., #1 := ...γ..., #2 := ...γ..., ...}`.
 
-  - We should eventually have a tactic which performs this normalization in a performant way.
-  - We should eventually have a delaborator which can render states `γ : ConA Γ` in a more
-    human-readable way.
--/
+theorem State.ite_push_state [Decidable c] {t e : StateT Γ M A}
+  : (if c then t else e) σ = (if c then t σ else e σ)
+  := by split <;> simp_all only
 
-@[simp] theorem ConA.update_lww {Γ : Con} {v : Var Γ A} {γ : Γ} : (γ.set v a').set v a'' = γ.set v a'' := sorry
-@[simp] theorem ConA.update_get {Γ : Con} {v : Var Γ A} {γ : Γ} : (γ.set v a').get v = a' := by
-  induction Γ with
-  | nil => cases v
-  | cons B Γ ih =>
-    cases v with
-    | vz => rfl
-    | vs v => simp only [get, ih]
--- more theorems
-
-
-
-
-
+theorem State.bind_push_state [Monad M] {a : StateT Γ M A} {b : A -> StateT Γ M B}
+  : (a >>= b) σ = (a σ >>= fun res => b res.fst res.snd)
+  := rfl
 
 
 
@@ -88,12 +57,18 @@ instance [Monad M] [Iter M] : Iter (StateT Γ M) := ⟨State.iter⟩
   # Interpreting
 -/
 
+def handle [Monad M] : Mem Γ Ans -> StateT Γ M Ans
+| .rd v => State.read v
+| .wr v val => State.write v val
+
 def interp (tm : ITree (Mem Γ) A) : StateT Γ (ITree ∅) A := fun s₀ =>
   ITree.corec (fun ⟨tm, s⟩ =>
     match tm.dest with
     | .ret (.up a) => .ret (.up (a, s))
     | .tau t => .tau (t, s)
     | .vis ⟨Ans, .up ((e : Mem Γ Ans)), (k : ULift Ans -> ITree (Mem Γ) A)⟩ =>
+      -- would be nice to use `handle` here instead of the match
+      -- let m : StateT Γ (ITree ∅) Ans := handle e
       match e with
       | .rd v => .tau ⟨k (.up (s.get v)), s⟩
       | .wr v val => .tau ⟨k (.up ()), s.set v val⟩

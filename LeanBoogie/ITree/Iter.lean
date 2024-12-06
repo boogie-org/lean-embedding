@@ -1,5 +1,6 @@
 import LeanBoogie.ITree.ITree
 import LeanBoogie.ITree.Monad
+import LeanBoogie.ITree.RunFinite
 import LeanBoogie.Iter
 
 namespace ITree
@@ -8,7 +9,6 @@ open LeanBoogie
 /-
   ## ITrees form an *iterative* monad
 -/
-
 
 /-- Repeat a computation until it returns `B`.
 
@@ -21,26 +21,17 @@ open LeanBoogie
       | inr b ⇒ Ret b
       end.
   ``` -/
-def iter (body : A -> ITree E (A ⊕ B)) (a₀ : A) : ITree E B := sorry -- TODO
-  -- ITree.corec (fun (x : A ⊕ ITree E (B)) =>
-  --   match x with
-  --   | .inl a =>
-  --     -- Run the body, if it returned `a` we iter again, if it returned `b` we are done.
-  --     let res : ITree E (A ⊕ B) := bind (body a) (fun ab =>
-  --       match ab with
-  --       | .inl a => .ret (.inl a)
-  --       | .inr b => .ret (.inr b)
-  --     )
-  --     match res.dest with
-  --     -- | .ret (a : A ⊕ B) => .ret sorry
-  --     | .ret (.inl a) => .tau (.inl a) -- call `iter body a`
-  --     | .ret (.inr b) => .ret b -- we are done
-  --     | .tau (t : ITree E _) => .tau (.inr t)
-  --     | .vis e k => sorry
-  --   | .inr b => Base.replay b .inr
-  -- ) (Sum.inl a₀)
+def iter (body : A -> ITree E (A ⊕ B)) (a₀ : A) : ITree E B :=
+  ITree.corec (fun (tab : ITree E (A ⊕ B)) =>
+    match tab.dest with
+    | .ret (.up (.inl a)) => .tau (body a) -- `iter body a`
+    | .ret (.up (.inr b)) => .ret (.up b) -- `ret b`
+    | .tau t => .tau t
+    | .vis ⟨Ans, e, k⟩ => .vis ⟨Ans, e, k⟩
+  ) (body a₀)
 
 instance : Iter (ITree E) := ⟨iter⟩
+
 
 theorem iter_fp {f : A -> ITree E (A ⊕ B)}
   : iter f a₀ = do let ab <- f a₀
@@ -49,16 +40,6 @@ theorem iter_fp {f : A -> ITree E (A ⊕ B)}
                    | .inr b => return b
   := by sorry
 
-/--
-  Definition loop (body : C + A → itree E (C + B)) : A → itree E B :=
-    fun a ⇒ iter (fun ca ⇒
-      cb <- body ca ;;
-      match cb with
-      | inl c ⇒ Ret (inl (inl c))
-      | inr b ⇒ Ret (inr b)
-      end) (inr a).
--/
-def loop (body : Sum C A -> ITree E (Sum C B)) (a : A) : ITree E B := sorry
-
-def iter_lift (body : A -> ITree E (A ⊕ B)) : (A ⊕ B) -> ITree E (A ⊕ B) :=
-  fun | .inl a => body a | .inr b => return .inr b
+instance : LawfulIter (ITree E) where
+  iter_fp' := iter_fp
+  while_fp := sorry

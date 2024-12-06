@@ -1,8 +1,7 @@
 import LeanBoogie.ITree
--- import LeanBoogie.ITree.ITree0W
 
 namespace LeanBoogie
-open ITree (Effect HasEff)
+open ITree (HasEff)
 
 /-- `Assume` and `Assert` effect. You can write programs such as the following,
   where you obtain a proof of the proposition you're assuming.
@@ -77,6 +76,7 @@ def ohno [HasEff AmAt E] : ITree E Empty := do
   prf.elim
 
 #print axioms assume'
+
 #print axioms ohno
 
 -- def interp : ITree AmAt A -> ITree0W A := sorry

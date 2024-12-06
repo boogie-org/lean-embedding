@@ -67,7 +67,7 @@ section SigmaWorkaround
   abbrev G_vis.Uncurried (E : Type → Type) : TypeFun.{1,1} 2 :=
     MvQPF.Sigma.{1} fun (Ans : Type) => (G.Uncurried Ans E)
 
-  abbrev G_vis (E : Type → Type) (A : Type) (ρ : Type 1) : Type 1 := G_vis.Uncurried E ![ULift A, ρ]
+  def G_vis (E : Type → Type) (A : Type) (ρ : Type 1) : Type 1 := G_vis.Uncurried E ![ULift A, ρ]
 
   #synth MvQPF (TypeFun.ofCurried (n := 2) @Prod.{1}) -- :)
 
@@ -115,7 +115,7 @@ abbrev Base.Uncurried  (E : Type -> Type) : TypeFun 2 :=
     (TypeFun.ofCurried (n := 3) (Shape E))
     ![G_ret.Uncurried E, G_tau.Uncurried E, G_vis.Uncurried E]
 
-abbrev Base (E : Type -> Type) (A : Type) (ρ : Type 1) : Type 1 := Base.Uncurried E ![ULift A, ρ]
+def Base (E : Type -> Type) (A : Type) (ρ : Type 1) : Type 1 := Base.Uncurried E ![ULift A, ρ]
 
 instance {E : Type -> Type} : MvFunctor (Base.Uncurried E) where
   map f x := MvQPF.Comp.map f x
@@ -135,12 +135,12 @@ inductive HeadT : Type 1
 | tau
 | vis
 
-abbrev ChildT : HeadT -> TypeVec.{1} 3
+def ChildT : HeadT -> TypeVec.{1} 3
 | .ret => ![PFin2 1, PFin2 0, PFin2 0] -- One `A`, zero `ρ`, zero `ν`
 | .tau => ![PFin2 0, PFin2 1, PFin2 0] -- Zero `A`, one `ρ`, zero `ν` (remember, `ρ` intuitively means `ITree E A`)
 | .vis => ![PFin2 0, PFin2 0, PFin2 1] -- Zero `A`, zero ρ, one ν (where ν is our `(Ans : Type) × ...`)
 
-abbrev P : MvPFunctor.{1} 3 := ⟨HeadT, ChildT⟩
+def P : MvPFunctor.{1} 3 := ⟨HeadT, ChildT⟩
 abbrev F (E : Type -> Type) : TypeVec.{1} 3 -> Type 1 := Shape.Uncurried E
 
 def box (E : Type -> Type) : F E α → P.Obj α
@@ -191,12 +191,12 @@ instance Base.instMvQPF : MvQPF (Base.Uncurried E) := inferInstance
   - Define our (co-)eliminator, `cases`, etc.
 -/
 
-abbrev Uncurried (E : Type -> Type) := MvQPF.Cofix (Base.Uncurried E)
-abbrev _root_.ITree (E : Type -> Type) (A : Type) : Type 1 := Uncurried E ![ULift A]
+def Uncurried (E : Type -> Type) := MvQPF.Cofix (Base.Uncurried E)
+def _root_.ITree (E : Type -> Type) (A : Type) : Type 1 := Uncurried E ![ULift A]
 
-abbrev ret {E : Type -> Type} {A : Type} (a : A) : ITree E A := MvQPF.Cofix.mk (Shape.ret (.up a))
-abbrev tau {E : Type -> Type} {A : Type} (t : ITree E A) : ITree E A := MvQPF.Cofix.mk (Shape.tau t)
-abbrev vis {E : Type -> Type} {A : Type} {Ans : Type} (e : E Ans) (k : Ans -> ITree E A) : ITree E A :=
+def ret {E : Type -> Type} {A : Type} (a : A) : ITree E A := MvQPF.Cofix.mk (Shape.ret (.up a))
+def tau {E : Type -> Type} {A : Type} (t : ITree E A) : ITree E A := MvQPF.Cofix.mk (Shape.tau t)
+def vis {E : Type -> Type} {A : Type} {Ans : Type} (e : E Ans) (k : Ans -> ITree E A) : ITree E A :=
   MvQPF.Cofix.mk (Shape.vis ⟨Ans, .up e, fun ans => k ans.down⟩)
 
 def corec {E : Type -> Type} {A : Type} {β : Type 1} (f : β → Base E A β) (b : β) : ITree E A
@@ -233,28 +233,29 @@ theorem cases_ret : cases (motive := motive) c_ret c_tau c_vis (.ret r) = c_ret 
 theorem cases_tau : cases (motive := motive) c_ret c_tau c_vis (.tau t) = c_tau t := sorry
 theorem cases_vis : cases (motive := motive) c_ret c_tau c_vis (.vis e k) = c_vis e k := sorry
 
+-- Without these being irreducible, some declarations in other files get a whnf/isDefEq timeout:
+attribute [irreducible] Uncurried ITree ret tau vis corec dest cases
 
 /-
-  # Some common stuff
+  # Some convenience stuff
 -/
 
 def spin : ITree E A := corec (fun .unit => .tau .unit) PUnit.unit
 
+-- This implementation is extremely brittle. It is deceptively simple, but moving things around just
+-- a little bit can break it, likely because of the order in which metavars get assigned.
+def Base.map (f : X -> Y) : Base E A X -> Base E A Y :=
+  fun (bX : Base.Uncurried E (![ULift A] ::: X)) =>
+    let arrow : TypeVec.Arrow ((![ULift A] : TypeVec 1) ::: X) (![ULift A] ::: Y) := TypeVec.appendFun (n := 1)
+      (α := ![ULift A]) (α' := ![ULift A])
+      TypeVec.id
+      f
+    let bY := MvFunctor.map (n := 2) (F := Uncurried E) arrow bX
+    bY
 
 /-- Just a convenience function. Re-plays a tree within another tree. -/
-def Base.replay (ta : ITree E A₁) (fTree : ITree E A₁ -> C) (fRet : A₁ -> A₂ := by exact id) : ITree.Base E A₂ C := sorry
---   match ta.dest with
---   | .ret (.up a : _) => .ret (.up (fRet a))
---   | .tau (t : ITree E A₁) => .tau (fTree t)
---   | .vis ⟨_, e, k⟩ => .vis e (fun x => fTree (k x))
-
-def _root_.TypeVec.ofList : (l : List Type) -> TypeVec l.length
-| [] => Vec.nil
-| t :: l => TypeVec.ofList l |>.append1 t
-
-def Base.Map (f : C -> D) : TypeVec.Arrow (TypeVec.ofList [C, B, E]) (TypeVec.ofList [D, B, E])
-  := TypeVec.appendFun TypeVec.id f
-
--- TODO:
--- def Base.Inr : TypeVec.Arrow (TypeVec.ofList [ITree E B, B, E]) (TypeVec.ofList [ITree E A ⊕ ITree E B, B, E])
---   := TypeVec.appendFun TypeVec.id Sum.inr
+def Base.replay (ta : ITree E A₁) (fTree : ITree E A₁ -> C) (fRet : A₁ -> A₂ := by exact id) : ITree.Base E A₂ C :=
+  match ta.dest with
+  | .ret (.up a : _) => .ret (.up (fRet a))
+  | .tau (t : ITree E A₁) => .tau (fTree t)
+  | .vis ⟨Ans, e, k⟩ => .vis ⟨Ans, e, (fun x => fTree (k x))⟩

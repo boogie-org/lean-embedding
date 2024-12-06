@@ -4,4 +4,3 @@ import LeanBoogie.ITree.Iter
 import LeanBoogie.ITree.RunFinite
 import LeanBoogie.ITree.Effect
 import LeanBoogie.ITree.Eutt
-import LeanBoogie.ITree.Imp

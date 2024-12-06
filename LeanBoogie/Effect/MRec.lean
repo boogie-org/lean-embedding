@@ -3,7 +3,7 @@ import LeanBoogie.State
 import Mathlib.Data.Real.Basic
 
 namespace LeanBoogie
-open ITree (Effect HasEff)
+open ITree (HasEff)
 
 
 /-
@@ -34,17 +34,21 @@ def call {Proc} (P : Proc -> Type × Type) [HasEff (MRec P) E] (p : Proc) (a : (
   .vis (MRec.call p a) .ret
 
 /-- This `mrec` is very different from the ITree paper. -/
-def mrec {E : Type -> Type} {Proc} (P)
+def mutualBlock {E : Type -> Type} {Proc} (P)
   (p : Proc)
-  (procs : (p : Proc) -> (P p).1 -> ITree (E + MRec P) (P p).2)
+  (procs : (p : Proc) -> (P p).1 -> ITree (E & MRec P) (P p).2)
   : (P p).1 -> ITree E (P p).2
   := ITree.iter (fun ab => sorry) -- probably a bad idea actually, go with the ITree paper approach instead?
 
--- Example:
-inductive Procs | f | g
-def P : Procs -> Type × Type | _ => ⟨Int, Int⟩
+def mrec : (ITree (MRec P) A) -> ITree ∅ A := sorry
 
-def mutualBlock : Int -> ITree E Int := mrec P Procs.f fun
+/-
+  ## Example
+-/
+private inductive Procs | f | g
+private def P : Procs -> Type × Type | _ => ⟨Int, Int⟩
+
+private example : Int -> ITree E Int := mutualBlock P Procs.f fun
 | Procs.f, (x : Int) => do -- def of `f`
   let n : Int <- call P .g (x * 3) -- `g(x * 3)`
   return n
