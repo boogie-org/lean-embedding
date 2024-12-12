@@ -1,12 +1,12 @@
 import LeanBoogie.Effect.Mem
 import LeanBoogie.Iter
-import LeanBoogie.Types
+import LeanBoogie.ConTy
 
 namespace LeanBoogie
 
 /-
   The file `Mem.lean` only defines the `Mem` effect, but lacks any interpretation.
-  We give one interpretation here.
+  We give one interpretation here, using `Con` and `ConA` from `LeanBoogie.ConTy`.
 
   You can imagine giving a completely different model for memory events in a world without
   strong consistency guarantees. I have no idea how that would look like, but it would

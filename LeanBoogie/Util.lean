@@ -10,7 +10,7 @@ elab "reduceType! " t:term : term => do
     let t' := Expr.letE `t tTypeReduced t (.bvar 0) false
     return t'
 
-open Lean Qq
+open Lean Meta Qq
 
 -- Some utils for Quote4
 def instantiateExprMVarsQ {m : Type → Type} {A : Q(Type)} [Monad m] [MonadMCtx m] [STWorld ω m] [MonadLiftT (ST ω) m] (e : Q($A)) : m Q($A) := do
@@ -48,3 +48,25 @@ def List.q_len {A : Q(Type 1)} : (N:Nat) -> (xs : List Q($A)) -> xs.length = N -
 -- For illustrative purposes, we want to suppress "warning: declaration uses sorry" often.
 axiom sorry! {P} : P
 macro "sorry!" : tactic => `(tactic| exact sorry!)
+
+set_option linter.unusedVariables false in
+/-- Dependent ite `if h : P then ... else ...` but everything is in meta. Assumes `P` is decidable. -/
+def Qq.ifQ (P : Q(Prop)) (tru : {h : Q($P)} -> MetaM X) (fals : {h : Q(¬$P)} -> MetaM X) : MetaM X := do
+  let dec <- synthInstanceQ q(Decidable $P)
+  let h <- mkFreshExprMVarQ P
+  if <- isDefEq dec q(Decidable.isTrue $h) then
+    tru (h := h)
+  else
+    let h <- mkFreshExprMVarQ q(¬ $P)
+    if <- isDefEq dec q(Decidable.isFalse $h) then
+      fals (h := h)
+    else
+      throwError "if_meta: Bug. The following expr is not `Decidable.isTrue` or `.isFalse`: {dec}"
+
+def Qq.instantiateMVarsQ' {u : Level} {α : Q(Sort u)} (e : Q($α)) : MetaM ((e' : Q($α)) ×' QuotedDefEq e e') := do
+  let res <- instantiateMVarsQ e
+  return ⟨res, QuotedDefEq.unsafeIntro⟩
+
+def Meta.assertDefEq (tag : MessageData) (e₁ e₂ : Expr) (msg : Option MessageData := none) : MetaM Unit := do
+  if ! (<- isDefEq e₁ e₂) then
+    throwError (msg.getD m!"[{tag}] assertDefEq failed between\n{e₁}\n and\n{e₂}")

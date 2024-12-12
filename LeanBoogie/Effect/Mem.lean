@@ -1,5 +1,5 @@
 import LeanBoogie.ITree
-import LeanBoogie.Types
+import LeanBoogie.ConTy
 import Mathlib.Data.Real.Basic
 
 namespace LeanBoogie
