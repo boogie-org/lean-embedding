@@ -62,15 +62,37 @@ instance instHasEff_right {E₁ E₂ : Type -> Type} : HasEff E₂ (E₁ & E₂)
   Strip := E₁
   elim l r := fun | .left e1 => r e1 | .right e2 => l e2
 
+
 /-
   # Interp, Handlers
-
   The ITree paper just defines one `interp` using `iter`, for which you can then obtain concrete
-  interpretations by giving it a `handler`.
+  interpretations by giving it a `h`andler.
   I wasn't able to figure out how `iter` is supposed to be used here. The code in the ITree repo
-  is slightly different from the code in the paper.
+  is slightly different from the code in the paper; I think the paper code may have some typos.
 -/
 
--- def interp  [Monad M] (handler : {A : Type} -> E A -> M A)
---   : ITree E A -> M A
---   := fun t => iter (fun t => sorry)
+
+/-- Interpreting events into another monad, which may again be the ITree monad but with e.g.
+  fewer or different effects.
+-/
+def interp [Monad M] (h : {A : Type} -> E A -> M A) : ITree E A -> M A :=
+  sorry
+
+/-
+  # Embedding
+-/
+
+/-- We can embed an ITree with fewer effects into an ITree with more.
+
+  *TODO*: We should have the following theorem: `interp_Es (embed t) = interp_E t`, where
+  we only need handlers for `E` instead of for `Es`.
+  If we happen to interp away all effects, using another theorem `interp_∅ t = t`.
+-/
+def embed [HasEff E Es] (t : ITree E A) : ITree Es A :=
+  sorry
+
+instance [HasEff E Es] : Coe (ITree E A) (ITree Es A) := ⟨embed⟩
+
+-- theorem interp_embed [HasEff E Es] {t : ITree E A} {h : {A : Type} -> Es A -> ITree E A}
+--   : interp h (embed (Es := Es) t) = interp h t
+--   := sorry

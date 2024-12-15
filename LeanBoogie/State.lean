@@ -119,18 +119,4 @@ theorem interp_read {v : Var Γ A} : interp (Mem.read v) = State.read v := sorry
 theorem interp_write {v : Var Γ A} : interp (Mem.write v val) = (State.write v val) := sorry
 theorem interp_ite [Decidable φ] : interp (if φ then t else e) = (if φ then interp t else interp e) := sorry
 
-
-
--- ## Example:
-
-structure Global_ where
-  i : Int
-  n : BitVec 32
-
-def Global.Γ : Con := [.int, .bv 32]
-abbrev Global : Type := Global.Γ
-abbrev Global.i (γ : Global) : Int       := γ.get .vz
-abbrev Global.n (γ : Global) : BitVec 32 := γ.get (.vs .vz)
-
-#check Global_.i
-#check Global.i
+#check Classical.byContradiction
