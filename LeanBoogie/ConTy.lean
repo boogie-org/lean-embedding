@@ -6,7 +6,6 @@ namespace LeanBoogie
 
 /- # Codes for Boogie types
 
-
 -/
 
 /-- Codes for Boogie types.
@@ -14,6 +13,7 @@ namespace LeanBoogie
   An alternative formulation would be forgo `Ty` entirely and define `def Con : Type 1 := List Type`,
   which would allow for arbitrary types.
 -/
+@[aesop unsafe cases 1%]
 inductive Ty : Type
 /-- Booleans. Interpreted as `Bool`. -/
 | bool : Ty
@@ -71,6 +71,7 @@ abbrev Con : Type := List Ty
 
 /-- Variables, referring to an entry in a context. This is essentially `Fin Γ.length`,
   but also asserts that the variable at that index has type `A`, which is often nicer to deal with. -/
+@[aesop unsafe cases 5%]
 inductive Var : (Γ : Con) -> (A : Ty) -> Type
 | vz :            Var (A :: Γ) A
 | vs : Var Γ A -> Var (B :: Γ) A
@@ -86,8 +87,10 @@ abbrev Var.v3 : Var (D :: C :: B :: A :: Γ) A := .vs (.vs (.vs .vz))
   intro h'
   induction Γ with
   | nil => cases v
-  | cons C Γ ih => sorry -- cases v, cases v'
-theorem Var.heq_same_Ty {Γ} (v₁ : Var Γ A) (v₂ : Var Γ B) : HEq v₁ v₂ -> A = B := sorry
+  | cons C Γ ih =>
+    sorry -- cases v, cases v'
+theorem Var.heq_same_Ty {Γ} (v₁ : Var Γ A) (v₂ : Var Γ B) : HEq v₁ v₂ -> A = B := by
+  sorry
 
 instance Var.decEq : DecidableEq (Var Γ A) := inferInstance
 instance Var.decHEq (v₁ : Var Γ A) (v₂ : Var Γ B) : Decidable (HEq v₁ v₂) :=
@@ -152,8 +155,16 @@ example {γ : ConA Γ} (a : TyA A) : @Eq (ConA Γ) (ConA.drop (Γ := (A :: Γ)) 
   ## Equational reasoning rules for states `γ : ConA Γ`
 -/
 
+-- (123, 1234, ())
+
 /-- Last write wins. -/
-@[simp] theorem ConA.lww {Γ : Con} {v : Var Γ A} {γ : Γ} : (γ.set v val₁).set v val₂ = γ.set v val₂ := sorry
+@[simp] theorem ConA.lww {Γ : Con} {v : Var Γ A} {γ : ConA Γ} : (γ.set v val₁).set v val₂ = γ.set v val₂ := by
+  induction Γ with
+  | nil => cases v
+  | cons B Γ ih =>
+    cases v with
+    | vz => rfl
+    | vs v => simp only [get, set, ih]
 
 @[simp] theorem ConA.get_set {Γ : Con} {v : Var Γ A} {γ : Γ} : (γ.set v val).get v = val := by
   induction Γ with
@@ -163,23 +174,64 @@ example {γ : ConA Γ} (a : TyA A) : @Eq (ConA Γ) (ConA.drop (Γ := (A :: Γ)) 
     | vz => rfl
     | vs v => simp only [get, ih]
 
-@[aesop safe] theorem ConA.get_set' {Γ : Con} {v₁ v₂ : Var Γ A} {γ : Γ} (h : v₁ = v₂)
+@[aesop unsafe 10%] theorem ConA.get_set' {Γ : Con} {v₁ v₂ : Var Γ A} {γ : Γ} (h : v₁ = v₂)
   : (γ.set v₁ val).get v₂ = val
   := by cases h; exact get_set
 
 /-- We can ignore a `set` if we're setting a different variable from the one we're reading. -/
-@[aesop safe] theorem ConA.get_set_irrelevant {Γ : Con} {γ : Γ} (v₁ v₂ : Var Γ A)
+@[aesop unsafe 10%] theorem ConA.get_set_irrelevant {Γ : Con} {γ : Γ} (v₁ v₂ : Var Γ A)
   (neq : ¬ v₁ = v₂) : (γ.set v₂ val).get v₁ = γ.get v₁
   := by
   induction Γ with
   | nil => cases v₁
-  | cons B Γ Γ_ih => sorry -- cases v; cases v'; ...
+  | cons B Γ Γ_ih =>
+    cases v₁ with
+    | vz =>
+      cases v₂ with
+      | vz => aesop
+      | vs v₂ => simp_all only [reduceCtorEq, not_false_eq_true]; rfl
+    | vs v₁ =>
+      cases v₂ with
+      | vz => aesop
+      | vs v₂ =>
+        simp_all only [Var.vs.injEq]
+        apply Γ_ih
+        simp_all only [not_false_eq_true]
+
+/-- We can ignore a `set` if we're setting a different variable from the one we're reading. -/
+@[aesop unsafe 10%] theorem ConA.get_set_irrelevant_heq {Γ : Con} {γ : Γ} {v₁ : Var Γ A} {v₂ : Var Γ B}
+  (neq : ¬ HEq v₁ v₂) : (γ.set v₂ val).get v₁ = γ.get v₁
+  := by
+  induction Γ with
+  | nil => cases v₁
+  | cons C Γ Γ_ih =>
+    cases v₁ with
+    | vz =>
+      cases v₂ with
+      | vz => simp_all only [heq_eq_eq, not_true_eq_false]
+      | vs v₂ => rfl
+    | vs v₁ =>
+      cases v₂ with
+      | vz => rfl
+      | vs v₂ =>
+        apply Γ_ih
+        have : ¬(@HEq (Var (C :: Γ) A) v₁.vs (Var (C :: Γ) B) v₂.vs) -> ¬HEq v₁ v₂ := by
+          -- Var.vs.injEq but HEq...
+          sorry
+        exact this neq
+
 
 /-- We can ignore a `set` if we're setting a different variable from the one we're reading.
   This is necessarily the case when the variables have a different type. -/
-@[aesop safe] theorem ConA.get_irrelevant_set_Ty {Γ : Con} {γ : Γ} {v : Var Γ A} {v' : Var Γ B}
-  (neq : ¬ A = B) : (γ.set v' a').get v = γ.get v
-  := by have neq : ¬HEq v v' := Var.neq_neq_Ty neq; sorry
+@[aesop unsafe 8%] theorem ConA.get_irrelevant_set_Ty {Γ : Con} {γ : Γ} {v₁ : Var Γ A} {v₂ : Var Γ B}
+  (neq : ¬ A = B) : (γ.set v₂ a').get v₁ = γ.get v₁
+  := by
+    -- have v_neq : ¬HEq v v' := Var.neq_neq_Ty neq
+    induction Γ with
+    | nil => simp_all only
+    | cons C Γ ih =>
+
+      sorry
 
 theorem ConA.grab {Γ : Con} {γ : Γ} (v : Var Γ A) : γ = γ.set v (γ.get v) := by
   induction Γ with
@@ -216,7 +268,8 @@ theorem Con.drop_n_1 {Γ : Con} {hn : n < List.length Γ} {hn_11 : n + 1 < List.
     | succ n ih_n =>
       induction Γ with
       | nil => rw [List.length] at hn_1; simp only [zero_add, add_lt_iff_neg_right, not_lt_zero'] at hn_1
-      | cons A Γ ih_Γ => sorry
+      | cons A Γ ih_Γ =>
+        sorry
 
 theorem Con.drop_n_1_A {Γ : Con} {hn : n < Γ.length} {hn_1} {hn_11 : n + 1 < Γ.length + 1}
   : ConA (Γ.drop ⟨n, hn_1⟩) = (TyA (Γ.get ⟨n, hn⟩) × ConA (Γ.drop ⟨n + 1, hn_11⟩))
@@ -232,6 +285,11 @@ theorem ConA.drop_n_1 {Γ : Con} {A : Ty} {γ : Γ} {hn_1} {hn : n < List.length
   Given a state `γ : ConA Γ`, we can normalize it into a `Prod.mk` telescope that is equal to
   `(γ.get v0, γ.get v1, γ.get v2, ...)`.
   This is done automatically using the `normalize` tactic.
+
+  Alternative approaches:
+  - Use `DiscrTree` or `LazyDiscrTree` for matching against a large amount of patterns.
+    `simp` uses those internally and is quite efficient.
+  - Use simprocs instead of the following normalize tactic.
 
   We should eventually have a delaborator which can render states `γ : ConA Γ` in a more
   human-readable way.
@@ -249,6 +307,40 @@ private def Stuff.normalize (s : Stuff) : s = Stuff.mk s.i s.x := by rfl
 end Example
 
 open Lean Elab Tactic Meta Qq
+
+def Ty.toExpr : Ty -> Q(Ty)
+| .int => q(.int)
+| .real => q(.real)
+| .bool => q(.bool)
+| .bv n => q(.bv $n)
+| .map A B =>
+  let Ae := toExpr A
+  let Be := toExpr B
+  q(.map $Ae $Be)
+
+instance : ToExpr Ty where
+  toExpr := Ty.toExpr
+  toTypeExpr := q(Ty)
+
+def Con.toExpr : Con -> Q(Con)
+| [] => q([])
+| A :: Γ =>
+  let Γe := toExpr Γ
+  q($A :: $Γe)
+
+instance : ToExpr Con where
+  toExpr := Con.toExpr
+  toTypeExpr := q(Con)
+
+def Var.toExpr {Γ : Con} {A : Ty} : Var Γ A -> Q(Var $Γ $A)
+| .vz => q(Var.vz)
+| .vs v =>
+  let vExpr := toExpr v
+  q(Var.vs $vExpr)
+
+instance : ToExpr (Var Γ A) where
+  toExpr := Var.toExpr
+  toTypeExpr := q(Var $Γ $A)
 
 set_option linter.unusedVariables false in
 def Con.casesQ {motive : Type} (Γ : Q(Con))
@@ -277,6 +369,13 @@ structure GetIrrelevantResult (A : Q(Ty)) (orig : Q(TyA $A)) where
   prfEq : Q($orig = $eNew)
 
 instance : Inhabited (GetIrrelevantResult A orig) := ⟨{ eNew := orig, prfEq := q(Eq.refl $orig) }⟩
+
+
+#check DiscrTree
+#check LazyDiscrTree
+
+-- Γ - n = (Γ[n] :: Γ - (n+1))
+-- γ - n = (γ.get n, γ - (n+1))
 
 /-- Gets a value from a state, stripping away irrelevant setters/getters.
 
@@ -402,11 +501,13 @@ partial def ConA.normalize.go (Γ : Q(Con)) (γ : Q(ConA $Γ)) (n : Nat) (hn : Q
         )
     )
 
+-- look into omega (or linarith)
+
 /-- Normalize a state `γ : ConA Γ` into form `(γ.get v0, (γ.get v1, (γ.get v2, ...)))`. -/
 def ConA.normalize (Γ : Q(Con)) (γ : Q(ConA $Γ)) : MetaM (NormalizeResult Γ γ) := do
   let ⟨_, γ_0', rw⟩ <- normalize.go Γ γ 0 q(Nat.zero_lt_succ (List.length $Γ))
   return {
-    γ' := q(@Con.drop_0 $Γ (Nat.zero_lt_succ (List.length $Γ)) ▸ $γ_0') -- the cast is not necessary because it holds definitionally
+    γ' := q(/- @Con.drop_0 $Γ (Nat.zero_lt_succ (List.length $Γ)) ▸ -/ $γ_0') -- the cast is not necessary because it holds definitionally
     prfEq := rw
   }
 
@@ -432,7 +533,7 @@ elab "normalize" : tactic => do
     -- assertDefEq "lhs = lhs'" (<- inferType lhs'_prf) (mkApp2 q(@Eq (ConA $Γ)) lhs lhs') -- just for debugging
     -- assertDefEq "rhs = rhs'" (<- inferType rhs'_prf) (mkApp2 q(@Eq (ConA $Γ)) rhs rhs') -- just for debugging
     -- logInfo m!"lhs'_prf : {<- inferType lhs'_prf}"
-    let φ'_proof <- mkFreshExprMVarQ q(@Eq (ConA $Γ) $lhs' $rhs') .natural `φ'
+    let φ'_proof <- mkFreshExprMVarQ q(@Eq (ConA $Γ) $lhs' $rhs') .natural
     let prf := mkAppN q(@eq_congr (ConA $Γ)) #[lhs, lhs', rhs, rhs', lhs'_prf, rhs'_prf]
     -- logInfo m!"prf ≣ {prf}"
     φ_proof.assign (.app prf φ'_proof)

@@ -39,11 +39,16 @@ def List.q {A : Q(Type)} : List Q($A) -> Q(List $A)
 | [] => q([])
 | x :: xs => let xs := q xs; q($x :: $xs)
 
-def List.q_len {A : Q(Type 1)} : (N:Nat) -> (xs : List Q($A)) -> xs.length = N -> Q((xs : List $A) ×' xs.length = $N)
-| 0, [], h => by cases h; exact q(⟨[], rfl⟩)
+def List.q_len {A : Q(Type 1)} : (N:Nat) -> (xs : List Q($A)) -> xs.length = N -> (xs : Q(List $A)) × Q(($xs).length = $N)
+| 0, [], h => by cases h; exact ⟨q([]), q(rfl)⟩
 | N+1, x :: xs, h => by
-  let xs := q_len N xs (by rw [List.length] at h; omega)
-  exact q(⟨$x :: ($xs).fst, by rw [List.length]; rw [($xs).snd]⟩)
+  let ⟨xs, hxs⟩ := q_len N xs (by rw [List.length] at h; omega)
+  exact ⟨q($x :: $xs), q(by rw [List.length]; exact congrFun (congrArg HAdd.hAdd «$hxs») 1)⟩
+
+def _root_.Std.HashMap.insertNewOrFail [Monad M] [BEq α] [Hashable α]
+  (m : Std.HashMap α β) (a : α) (b : β) (fail : {_ : α} -> M (Std.HashMap α β ))
+  : M (Std.HashMap α β)
+  := if let ⟨.none, res⟩ := m.getThenInsertIfNew? a b then return res else @fail a
 
 -- For illustrative purposes, we want to suppress "warning: declaration uses sorry" often.
 axiom sorry! {P} : P
@@ -61,7 +66,17 @@ def Qq.ifQ (P : Q(Prop)) (tru : {h : Q($P)} -> MetaM X) (fals : {h : Q(¬$P)} ->
     if <- isDefEq dec q(Decidable.isFalse $h) then
       fals (h := h)
     else
-      throwError "if_meta: Bug. The following expr is not `Decidable.isTrue` or `.isFalse`: {dec}"
+      throwError "ifQ: Bug. The following expr is not `Decidable.isTrue` or `.isFalse`: {dec}"
+
+set_option linter.unusedVariables false in
+/-- Only the `then` branch of `ifQ`, and throws meta error otherwise. Synthesizes `Decidable P`. -/
+def Qq.assumeQ (P : Q(Prop)) : MetaM Q($P) := do
+  let dec <- synthInstanceQ q(Decidable $P)
+  let h <- mkFreshExprMVarQ P
+  if <- isDefEq dec q(Decidable.isTrue $h) then
+    return h
+  else
+    throwError "assumeQ error, the following does not decide to true: {P}, instead we got {h}"
 
 def Qq.instantiateMVarsQ' {u : Level} {α : Q(Sort u)} (e : Q($α)) : MetaM ((e' : Q($α)) ×' QuotedDefEq e e') := do
   let res <- instantiateMVarsQ e
