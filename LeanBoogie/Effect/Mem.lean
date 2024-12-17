@@ -31,6 +31,10 @@ def Mem.write' (v : Var Γ A) (val : A) : ITree (E & Mem Γ) Unit := .vis (Mem.w
 def Mem.read''  [HasEff (Mem Γ) E] (v : Var Γ A)           : ITree E A    := .vis (Mem.rd v    ) .ret
 def Mem.write'' [HasEff (Mem Γ) E] (v : Var Γ A) (val : A) : ITree E Unit := .vis (Mem.wr v val) .ret
 
+def Mem.merge : ITree (Mem Γ & Mem Δ) A -> ITree (Mem (Γ ++ Δ)) A := sorry
+def Mem.split : ITree (Mem (Γ ++ Δ)) A -> ITree (Mem Γ & Mem Δ) A := sorry
+
+
 private def Γ : Con := [.int, .bv 32, .bool ~> .int]
 private def i : Var Γ .int := .v0
 private def b : Var Γ (.bv32) := .v1
@@ -39,14 +43,8 @@ private example : ITree (Mem Γ) Unit := do
   let fn : Bool -> Int <- Mem.read f
   Mem.write b (fn false)
 
-def merge : ITree (Mem Γ & Mem Δ) A -> ITree (Mem (Γ ++ Δ)) A := sorry
 
-
-/-
-  # The Boogie Way
--/
-
-axiom Ref : Type
-def C.data : Ref -> Int := sorry
-def C.next : Ref -> Ref := sorry
-def alloc : Ref -> Prop := sorry -- which refs are allocated
+-- axiom Ref : Type
+-- def C.data : Ref -> Int := sorry
+-- def C.next : Ref -> Ref := sorry
+-- def alloc : Ref -> Prop := sorry -- which refs are allocated

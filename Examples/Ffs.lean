@@ -171,5 +171,28 @@ bb15:
 
 #check 10
 
-example : interp ffs_imp = interp ffs_ref := by
+-- todo1: Hide internal state
+-- todo2: Lift each block into its own def to make terms smaller
+
+/-
+  Stuff in play:
+  - Global state: `G : Con`
+  - Return value: `R : Ty`
+  - Parameters: `P : Con`
+  - Local variables: `L : Con`
+
+  From the outside perspective, `procedure f(x: bv16, y: bv16) returns (r:bv32) { ... }` should have
+  the signature `[bv16, bv16]ᴬ -> ITree (Mem G) bv32ᴬ`, so a complete absence of local vars `L`.
+  Internally, we will have the context `Γ := L ++ P ++ [R] ++ G`.
+
+
+-/
+
+example : ffs_imp (i0, ()) = ffs_ref (i0, ()) := by
+  unfold ffs_imp
+  simp
+  rw [runProc, runRes]
+
+  -- rw [ffs_imp]
+
   sorry

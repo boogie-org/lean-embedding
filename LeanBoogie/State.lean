@@ -74,13 +74,13 @@ def interp (tm : ITree (Mem Γ) A) : StateT Γ (ITree ∅) A := fun s₀ =>
       | .wr v val => .tau ⟨k (.up ()), s.set v val⟩
   ) (tm, s₀)
 
-def interp' {E : Type -> Type} (tm : ITree (E & Mem Γ) A) : StateT Γ (ITree E) A := fun s₀ =>
+def interp' {E : Type -> Type} (tm : ITree (Mem Γ & E) A) : StateT Γ (ITree E) A := fun s₀ =>
   ITree.corec (fun ⟨tm, s⟩ =>
     match tm.dest with
     | .ret (.up a) => .ret (.up (a, s))
     | .tau t => .tau (t, s)
-    | .vis ⟨Ans, .up (.left  (e : E Ans    )), k⟩ => .vis ⟨Ans, .up e, fun ans => ⟨k ans, s⟩⟩ -- don't interpret the rest of the effects.
-    | .vis ⟨Ans, .up (.right (e : Mem Γ Ans)), (k : ULift Ans -> ITree (E & Mem Γ) A)⟩ =>
+    | .vis ⟨Ans, .up (.right (e : E Ans    )), k⟩ => .vis ⟨Ans, .up e, fun ans => ⟨k ans, s⟩⟩ -- don't interpret the rest of the effects.
+    | .vis ⟨Ans, .up (.left  (e : Mem Γ Ans)), (k : ULift Ans -> ITree (Mem Γ & E) A)⟩ =>
       match e with
       | .rd v => .tau ⟨k (.up (s.get v)), s⟩
       | .wr v val => .tau ⟨k (.up ()), s.set v val⟩

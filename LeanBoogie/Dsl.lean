@@ -125,12 +125,21 @@ Eventually, we should be generic over the effects, using machinery such as `HasE
 abbrev EffB (Γ : Con) := Mem Γ
 -- abbrev EffB (Γ : Con) := Mem Γ & AmAt
 
-/-- An elaborated boogie block. -/
+/-- An elaborated boogie block.
+
+  Ideally we would only have `code : Q(ITree (EffB Γ) (Fin nBlocks))`, but we need to
+  - Explicitly store the `assumes` in order to make non-deterministic `goto A, B, C;` deterministic (if possible).
+    This could be avoided by using choice trees, and using effects for assumes instead (`AssumeAssert.lean`).
+  - Store `gotos` because when one block gets elaborated individually, we don't know yet how many
+    blocks there are and what their indices are.
+    This could be avoided by storing a mapping from block label to `?idx : Fin ?N` in `BoogieElab`,
+    which then get backfilled at the end of elaboration with the concrete indices.
+-/
 structure EBlock (Γ : Con) where
   label : TSyntax `ident
   /-- Any leading assumes for this block. -/
   assumes : Q(ITree (EffB $Γ) Bool)
-  /-- Code without `goto`s. -/
+  /-- Code without `assume`s and without `goto`s. -/
   code : Q(ITree (EffB $Γ) Unit)
   /-- The labels from `goto A, B, C;`. Empty list `[]` for `return;`.
 
@@ -155,7 +164,8 @@ structure EVar (Γ : Con) where
 structure BoogieElab (Γ : Con) where
   /-- Mapping of names to de-Brujin indices, but also the type of the variable. -/
   varInfo : Std.HashMap Name (EVar Γ)
-  blocks : Array (EBlock Γ) := #[]
+  -- nBlocks : Q(Nat)
+  -- blockIndices : Std.HashMap Name Q(Fin $nBlocks) := {}
 deriving Inhabited
 
 abbrev BoogieElabM (Γ : Con) := StateT (BoogieElab Γ) TermElabM
@@ -293,9 +303,6 @@ mutual
     let inst <- mkInstMVar (Inst X Y)
     @f X Y inst x y
 
-  -- partial def elabBinOp (A B B' : Q(Type)) (x y : TSyntax `BoogieExpr) (f : Q($A) -> Q($A) -> Q($B)) : BoogieElabM Γ Q($B) :=
-  --   elabBinOpM A B B' x y (fun x y => pure (f x y))
-
   /-- Evaluate a boogie expression, assuming that the Lean local context already contains variables
     which have been read from the boogie state monad, so assuming that we are within `withReadMutVars`. -/
   private partial def elabBoogieExprPure (A : Q(Type)) (stx : TSyntax `BoogieExpr) : BoogieElabM Γ Q($A) := do
@@ -428,7 +435,7 @@ where go
 
 /-- Creates a program which decides the truth value of each assume, returns conjunction of that. -/
 partial def elabBoogieAssume' {Γ : Con} : TSyntax `BoogieAssume -> BoogieElabM Γ Q(ITree (EffB $Γ) Bool)
-| stx@`(BoogieAssume| assume $φ:BoogieFormula; ) => do
+| stx@`(BoogieAssume| assume $φ:BoogieFormula; ) => withRef stx do
   withTraceNode `LeanBoogie.dsl (logger m!"elabBoogieAssume' `{stx}`") do
     let vars <- collectMutVarsFormula φ
     withReadMutVars vars.toList q(Bool) do
@@ -440,7 +447,7 @@ partial def elabBoogieAssume' {Γ : Con} : TSyntax `BoogieAssume -> BoogieElabM 
 
 -- This is not in `BoogieElabM` because at this point we don't know the variables (and thus Γ) yet.
 def elabBoogieVarBinder : TSyntax `BoogieVarBinder -> TermElabM (TSyntax `ident × Ty)
-| `(BoogieVarBinder| $id:ident : $type:BoogieType) => do
+| stx@`(BoogieVarBinder| $id:ident : $type:BoogieType) => withRef stx do
   let ty : Ty <- elabBoogieType type
   Term.addTermInfo' type (<- whnf q($ty))
   return (id, ty)
@@ -453,17 +460,19 @@ def elabBoogieVarCmds (binders: TSyntaxArray `BoogieVarCmd) : TermElabM (Array (
   binders.mapM fun
     | `(BoogieVarCmd| var $b; ) => elabBoogieVarBinder b
     | stx => throwError "elabBoogieVarCmds: unknown syntax {stx}"
+
 mutual
   /-- Elaborates a command such as `x := 2 * y;` or `while ... { ... }` into a monadic action. -/
   partial def elabBoogieCommand {Γ : Con} (stx : TSyntax `BoogieCommand) : BoogieElabM Γ Q(ITree (EffB $Γ) Unit) := do
     withTraceNode `LeanBoogie.dsl (logger m!"elabBoogieCommand `{stx}`") do
-      withSynthesize do
-        let ret <- withRef stx (go stx)
-        let ret <- instantiateExprMVarsQ ret
-        Term.addTermInfo' stx ret
-        return ret
+      withRef stx do
+        withSynthesize do
+          let ret <- go stx
+          let ret <- instantiateExprMVarsQ ret
+          Term.addTermInfo' stx ret
+          return ret
   where go
-  | _stx@`(BoogieCommand| $vName:ident := $e:BoogieExpr; ) => do
+  | `(BoogieCommand| $vName:ident := $e:BoogieExpr; ) => do
     if let some { A, vq, .. } := <- lookupVar vName.getId then
       let val : Q(ITree (EffB $Γ) $A) <- elabBoogieExpr q($A) e
       Term.addTermInfo' vName q($vq)
@@ -521,35 +530,6 @@ def elabBoogieBlock {Γ : Con} : TSyntax `BoogieBlock -> BoogieElabM Γ (EBlock 
       return ⟨lbl, assumes, cmds, #[]⟩
     | _ => throwError "elabBoogieBlock: Unknown syntax {gotoOrReturn}"
 | stx => throwError "elabBoogieBlock: Unknown syntax {stx}"
-
-/-- Elab all arg, ret, and var binders, bundling them up into a `Γ : Con`. Also builds mapping
-  from variable names to variable indices which is stored inside `BoogieElabM`. -/
-def elabProcContext (stx : TSyntax `BoogieProc)
-  (cont : (procName : Name) -> (Γ : Con) ->
-    (cmds : TSyntaxArray `BoogieCommand) ->
-    (blocks : TSyntaxArray `BoogieBlock) ->
-    (gotoOrReturn : Option <| TSyntax `LeanBoogie.BoogieBlockGotoOrReturn) ->
-    BoogieElabM Γ X
-  )
-  : TermElabM X := do
-  match stx with
-  | `(BoogieProc| procedure $proc ( $argBinders,* ) $[returns ($retBinder)]? { $varBinders:BoogieVarCmd* $cmds:BoogieCommand* $[$gotoOrReturn:BoogieBlockGotoOrReturn]? $blocks:BoogieBlock* }) => do
-    let argBinders <- argBinders.getElems.mapM fun (b : TSyntax _) => withRef b (elabBoogieVarBinder b)
-    let retBinder <- retBinder.mapM fun (b : TSyntax _) => withRef b (elabBoogieVarBinder b)
-    let varBinders <- elabBoogieVarCmds varBinders
-    let binders : List (TSyntax `ident × Ty) := argBinders ++ retBinder.toArray ++ varBinders |>.toList
-    let names := binders.map Prod.fst
-    let Γ : Con := binders.map Prod.snd
-
-    let mut varInfo : Std.HashMap Name (EVar Γ) := {}
-    for h : i in [0 : Γ.length] do -- surely this can be written nicer somehow?
-      have h : i < Γ.length := by simp_all only [Membership.mem, zero_le, Array.toList_eq, Array.append_data, List.append_assoc, List.map_append, List.length_append, List.length_map, Array.data_length, true_and, Γ, binders]
-      varInfo <- varInfo.insertNewOrFail names[i]!.getId
-        { i := ⟨i, h⟩, v := Var.ofIdx ⟨i, h⟩ }
-        (@fun a => throwErrorAt names[i]! "Duplicate variable name {a} in {names}")
-
-    StateT.run' (cont proc.getId Γ cmds blocks gotoOrReturn) { varInfo }
-  | stx => throwError "elabBoogieProcFrame: Unknown syntax {stx}"
 
 /-- Takes a bunch of pre-elaborated individual blocks, and ties them together with `iter`.
 
@@ -615,11 +595,81 @@ def wireUpBlocksDeterministic {Γ : Con} (blocks : List (EBlock Γ)) (blocks_h :
   let prf <- assumeQ q(0 < $N) -- this can be optimized
   return q(iter (selectBlock $N $(blocks'') $h) ⟨0, $prf⟩)
 
+/-- Given an ITree which may refer to default-initialized local vars `L`, parameters `P`,
+  obtain a `P -> ITree (Mem G) R`. -/
+def runProc {P L : Con} {R : Type} (t : ITree (Mem (L ++ P)) R) (p : P) : ITree 0 R :=
+  Prod.fst <$> interp' t ((default : L) ++ p)
+
+/-- Given an ITree which may refer to default-initialized local vars `L`, parameters `P`, and
+  global variables `G`, obtain a `P -> ITree (Mem G) R`. -/
+def runProcGlobals {G P L : Con} {R : Ty} (t : ITree (Mem (L ++ P ++ G)) R) (p : P) : ITree (Mem G) R :=
+  Prod.fst <$> interp' (Mem.split t) ((default : L) ++ p)
+
+def runRes {A : Ty} (t : ITree (Mem ([A] ++ Γ)) Unit) (a : A) : ITree (Mem Γ) A :=
+  (Prod.fst ∘ Prod.snd) <$> interp' (Mem.split t) (a, ())
+
+abbrev TyA_or_Unit (A : Option Ty) : Type := A.map TyA |>.getD Unit
+
 /-- Elaborated Boogie procedure. -/
 structure EBoogieProc where
   name : Name
-  Γ : Con
-  code : Q(ITree (EffB $Γ) Unit)
+  /-- Global variables. -/
+  G : Con
+  /-- Return type. -/
+  R : Option Ty
+  /-- Parameters -/
+  P : Con
+  code : Q($P -> ITree (EffB $G) (TyA_or_Unit $R))
+
+/-- Elab all arg, ret, and var binders, bundling them up into a `Γ : Con`. Also builds mapping
+  from variable names to variable indices which is stored inside `BoogieElabM`. -/
+def elabProcContext (stx : TSyntax `BoogieProc)
+  (cont : (Γ : Con) ->
+    (cmds : TSyntaxArray `BoogieCommand) ->
+    (blocks : TSyntaxArray `BoogieBlock) ->
+    (gotoOrReturn : Option <| TSyntax `LeanBoogie.BoogieBlockGotoOrReturn) ->
+    BoogieElabM Γ Q(ITree (EffB $Γ) Unit)
+  )
+  : TermElabM EBoogieProc := do
+  match stx with
+  | `(BoogieProc| procedure $proc ( $argBinders,* ) $[returns ($retBinder)]? { $varBinders:BoogieVarCmd* $cmds:BoogieCommand* $[$gotoOrReturn:BoogieBlockGotoOrReturn]? $blocks:BoogieBlock* }) => do
+    let argBinders <- argBinders.getElems.mapM fun (b : TSyntax _) => withRef b (elabBoogieVarBinder b)
+    let P : Con := argBinders.map Prod.snd |>.toList
+    let P_names := argBinders.map Prod.fst |>.toList
+
+    let retBinder <- retBinder.mapM fun (b : TSyntax _) => withRef b (elabBoogieVarBinder b)
+    let R : Option Ty := retBinder.map Prod.snd
+    -- let R_names := retBinder.map Prod.fst
+
+    let varBinders <- elabBoogieVarCmds varBinders
+    let L : Con := varBinders.map Prod.snd |>.toList
+    let L_names := varBinders.map Prod.fst |>.toList
+
+    if let some R := R then
+      let Γ : Con := [R] ++ L ++ P
+      let Γ_names := [retBinder.map Prod.fst |>.get!] ++ L_names ++ P_names
+      let varInfo <- buildVarInfo Γ_names (by sorry)
+      let t : Q(ITree (EffB $Γ) Unit) <- StateT.run' (cont Γ cmds blocks gotoOrReturn) { varInfo }
+      let t : Q(ITree (EffB ($L ++ $P)) $R) := q(runRes $t default) -- `default`-initialize the return variable.
+      let t : Q($P -> ITree 0 $R) := q(runProc $t)
+      return { name := proc.getId, G := [], P, R := some R, code := t }
+    else
+      let Γ : Con := L ++ P
+      let Γ_names := L_names ++ P_names
+      let varInfo <- buildVarInfo Γ_names (by sorry)
+      let t : Q(ITree (EffB $Γ) Unit) <- StateT.run' (cont Γ cmds blocks gotoOrReturn) { varInfo }
+      let t : Q($P -> ITree 0 Unit) := q(runProc $t)
+      return { name := proc.getId, G := [], P, R := none, code := t }
+  | stx => throwError "elabBoogieProcFrame: Unknown syntax {stx}"
+where
+  buildVarInfo {Γ} (names : List (TSyntax `ident)) (h : Γ.length = names.length) : TermElabM (Std.HashMap Name (EVar Γ)) := do
+    let mut varInfo : Std.HashMap Name (EVar Γ) := {}
+    for h : i in [0 : Γ.length] do -- surely this can be written nicer somehow?
+      have h : i < Γ.length := by simp_all only [Membership.mem, zero_le, Array.toList_eq, Array.append_data, List.append_assoc, List.map_append, List.length_append, List.length_map, Array.data_length, true_and]
+      varInfo <- varInfo.insertNewOrFail names[i]!.getId
+        { i := ⟨i, h⟩, v := Var.ofIdx ⟨i, h⟩ }
+        (@fun a => throwErrorAt names[i]! "Duplicate variable name {a} in {names}")
+    return varInfo
 
 def elabGotoOrReturn (stx : TSyntax `LeanBoogie.BoogieBlockGotoOrReturn) : TermElabM (Array (TSyntax `ident)) := do
   match stx with
@@ -628,11 +678,10 @@ def elabGotoOrReturn (stx : TSyntax `LeanBoogie.BoogieBlockGotoOrReturn) : TermE
   | _ => throwUnsupportedSyntax
 
 def elabBoogieProc (stx : TSyntax `BoogieProc) : TermElabM EBoogieProc := do
-  elabProcContext stx fun procName (Γ : Con) cmds blocks gotoOrReturn => do
+  elabProcContext stx fun (Γ : Con) cmds blocks gotoOrReturn => do
     if h : blocks.size = 0 then
       -- No labels declared at all, in that case we don't need to set up blocky stuff at all.
-      let cmds <- elabBoogieCommands cmds
-      return { name := procName, Γ := Γ, code := cmds }
+      elabBoogieCommands cmds
     else
       let blocks <- blocks.mapM elabBoogieBlock
       let gotos : Array (TSyntax `ident) <- do
@@ -649,8 +698,7 @@ def elabBoogieProc (stx : TSyntax `BoogieProc) : TermElabM EBoogieProc := do
           }]
         else pure #[]
       let blocks := leadingBlock ++ blocks
-      let code <- wireUpBlocksDeterministic blocks.toList sorry
-      return { name := procName, Γ, code}
+      wireUpBlocksDeterministic blocks.toList sorry
 
 /-
   ## Embedding Boogie syntax into Lean syntax.
@@ -668,18 +716,20 @@ def elabBoogieProc (stx : TSyntax `BoogieProc) : TermElabM EBoogieProc := do
 
 elab stx:BoogieProc : command => do
   Command.liftTermElabM do
-    let proc <- elabBoogieProc stx
-    let Γ : Con := proc.Γ
+    let { name, G, R, P, code } <- elabBoogieProc stx
+    let value <- instantiateMVars code
+    let ty <- inferType value
     let decl : DefinitionVal := {
-      name := (<- getCurrNamespace) ++ proc.name
-      type := q(ITree (EffB $Γ) Unit)
-      value := <- instantiateMVars proc.code
+      name := (<- getCurrNamespace) ++ name
+      type := ty
+      value := <- instantiateMVars code
       levelParams := []
       hints := .abbrev
       safety := .safe
     }
+    -- throwError "b"
     addDecl (.defnDecl decl)
-    compileDecl (.defnDecl decl)
+    -- compileDecl (.defnDecl decl)
 
 -- /-- Boogie Commands -/
 -- elab "b{" cmds:BoogieCommand* "}" : term => runBoogieElab (elabBoogieCommands cmds)
@@ -702,15 +752,16 @@ elab stx:BoogieProc : command => do
 
 -- #print foo
 
-set_option trace.LeanBoogie.dsl true
+-- set_option trace.LeanBoogie.dsl true
 
-procedure test_func(x: bv32) {
-  x := x + 1;
+-- #exit
+
+procedure test_func(x: int) returns (r: int) {
+  var i : bv32;
 }
 
 #print test_func
 
-#exit
 
 procedure bar(y:int, x: int) {
   goto bb0;

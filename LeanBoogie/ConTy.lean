@@ -14,7 +14,7 @@ namespace LeanBoogie
   which would allow for arbitrary types.
 -/
 @[aesop unsafe cases 1%]
-inductive Ty : Type
+inductive Ty /- (Ptr : Type) -/ : Type
 /-- Booleans. Interpreted as `Bool`. -/
 | bool : Ty
 /-- Unbounded integers. Interpreted as `ℤ`. -/
@@ -30,6 +30,37 @@ inductive Ty : Type
   says that maps are not extensional, due to [a Dafny issue](https://github.com/dafny-lang/dafny/issues/2463).
   We choose to ignore this, for now. -/
 | map (A B : Ty) : Ty
+
+-- /-- Pointers are just variables. This implies pointers always point into valid memory, and
+--   always point to something that actually has type `A`.
+--   This is (in my opinion --Max), the theoretically ideal way of modeling pointers. However, it comes
+--   with a big issue: It requires induction-induction (ind-ind), which Lean doesn't natively support.
+--   This is because we need to wrap `Con : Type`, `Ty : Type`, and `Var : Con -> Ty -> Type` into one
+--   mutual block, and `Var` is a type constructor which refers to the other types in the same
+--   mutual block; this is ind-ind.
+--   Fortunately, ind-ind can be reduced to Lean's mutual inductive types, and there exists a repo
+--   which does that, although it is a bit out of date: https://github.com/javra/iit .
+--   A fork updating it to Lean 4.6 is at https://github.com/arthur-adjedj/iit/tree/bump/4.6.0 .
+--   While that repo automates the process, it is a little buggy and unmaintained. It is not too
+--   difficult to do this reduction by hand: You split your ind-ind type up into an erased half with
+--   no type indices at all, and a wellformedness half (in Prop) which add indices back. Then you
+--   subtype those together. -/
+-- | var {A : Ty} {Γ : Con} (v : Var Γ A) : Ty
+
+-- /-- A pointer into some `Ty.map A B`, i.e. storing the key of the map.
+--   This requires induction-recursion (ind-rec), because we have to define the recursive function
+--   `TyA : Ty -> Type` in the same mutual block as `Ty`.
+--   You can work around this, either by using a similar approach to reducing induction-induction,
+--   or by using the approach described in https://akaposi.github.io/pres_types_2023.prf slide 6.
+--   Intuitively, Kaposi's approach would store the result of the recursive function `TyA A` as a
+--   type index on every constructor of `Ty`.  -/
+-- | ptr {A B : Ty} : TyA A -> Ty
+
+-- /-- Pointer into some `Ty.map Ptr B`, for example `Ty.map (BitVec 32) B`. This requires no
+--   ind-ind or ind-rec, but only allows for one pointer type. You also can not refer to other
+--   variables in the context. There is no way of knowing which mapping you refer to, if your
+--   context stores more than one `Ty.map`. -/
+-- | ptr {B : Ty} : Ptr -> Ty
 deriving Repr, DecidableEq
 infixl:20 " ~> " => Ty.map
 
@@ -139,6 +170,13 @@ def ConA.set : {Γ : Con} -> Γ -> Var Γ A -> A -> Γ
 | _ :: _, (a, γ), .vs v, a' => (a, γ.set v a')
 
 set_option linter.unusedVariables false in
+/-- For example `(a, b, ()) ++ (c, d, ()) = (a, b, c, d, ())`. -/
+def ConA.append : {Γ : Con} -> {Δ : Con} -> Γ -> Δ -> (Γ ++ Δ)
+|     [], Δ,     (), δ => δ
+| A :: Γ, Δ, (a, γ), δ => (a, append γ δ)
+instance {Γ Δ : Con} : HAppend Γ Δ (Γ ++ Δ) := ⟨ConA.append⟩
+
+set_option linter.unusedVariables false in
 def ConA.dropImpl {Γ : Con} (γ : Γ) : (n : Nat) -> (h : n < Γ.length + 1) -> Con.dropImpl n Γ h
 | 0, _ => γ
 | n+1, h =>
@@ -154,8 +192,6 @@ example {γ : ConA Γ} (a : TyA A) : @Eq (ConA Γ) (ConA.drop (Γ := (A :: Γ)) 
 /-
   ## Equational reasoning rules for states `γ : ConA Γ`
 -/
-
--- (123, 1234, ())
 
 /-- Last write wins. -/
 @[simp] theorem ConA.lww {Γ : Con} {v : Var Γ A} {γ : ConA Γ} : (γ.set v val₁).set v val₂ = γ.set v val₂ := by
