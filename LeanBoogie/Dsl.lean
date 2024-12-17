@@ -5,10 +5,11 @@ import LeanBoogie.ITree
 import LeanBoogie.Effect.Mem
 import LeanBoogie.Effect.AssumeAssert
 import LeanBoogie.State
+import LeanBoogie.TraceClasses
 import Batteries.Data.Array.Monadic
 
 namespace LeanBoogie
-open Lean Elab Meta Qq
+open Lean Elab Term Meta Qq
 open Std (HashSet HashMap)
 
 open ITree
@@ -29,6 +30,10 @@ section Syntax
   syntax "bool" : BoogieType
   -- syntax "bv" noWs num : BoogieType -- Can we get something like this to work?
   syntax "bv32" : BoogieType
+  syntax "bv16" : BoogieType
+  syntax "bv8" : BoogieType
+  syntax "bv4" : BoogieType
+  syntax "bv2" : BoogieType
   syntax "bv1" : BoogieType
 
   declare_syntax_cat BoogieVarBinder
@@ -94,8 +99,12 @@ section Syntax
       (BoogieBlockGotoOrReturn)?
       BoogieBlock*
     " }" : BoogieProc
-end Syntax
 
+  -- syntax ident,+ " := " BoogieExpr,+ ";" : BoogieCommand
+  -- macro_rules
+  -- | `(BoogieCommand| $x:ident , $xs:ident,* := $e:BoogieExpr , $es:BoogieExpr,*; ) => do
+  --   `(BoogieCommand| $x:ident := $e:BoogieExpr; $xs := $es; )
+end Syntax
 
 
 
@@ -113,7 +122,8 @@ section Elab
 /-- Our choice of effects for Boogie programs: `Mem Γ` and `AmAt` (assume and assert).
 
 Eventually, we should be generic over the effects, using machinery such as `HasEffect` etc. -/
-abbrev EffB (Γ : Con) := Mem Γ & AmAt
+abbrev EffB (Γ : Con) := Mem Γ
+-- abbrev EffB (Γ : Con) := Mem Γ & AmAt
 
 /-- An elaborated boogie block. -/
 structure EBlock (Γ : Con) where
@@ -150,23 +160,56 @@ deriving Inhabited
 
 abbrev BoogieElabM (Γ : Con) := StateT (BoogieElab Γ) TermElabM
 
--- def declareVar (x : Name) : BoogieElabM Unit := do
---   if (<- getThe BoogieElab).vars.contains x then throwError "Mutable variable {x} has already been declared"
---   else modifyThe BoogieElab (fun s => { s with vars := s.vars.insert x })
+private def logger [Monad m] [MonadTrace m] [MonadLiftT IO m] [MonadRef m] [AddMessageContext m]
+  [MonadOptions m] {α : Type} [MonadAlwaysExcept Exception m] [MonadLiftT BaseIO m] [ToMessageData α]
+  (fn : MessageData)
+  (ok : {_ : α} -> MessageData := @fun val => m!"{val}")
+  (err : {_ : Exception} -> MessageData := @fun e => m!"💥️ {e.toMessageData}")
+  : Except Exception α → m MessageData
+| .ok val => return m!"{fn} ~~> {@ok val}"
+| .error e => return m!"{fn} ~~> {@err e}"
 
+private def logger' [Monad m] [MonadTrace m] [MonadLiftT IO m] [MonadRef m] [AddMessageContext m]
+  [MonadOptions m] {α : Type} [MonadAlwaysExcept Exception m] [MonadLiftT BaseIO m]
+  (fn : MessageData)
+  (ok : {_ : α} -> MessageData := "✓")
+  (err : {_ : Exception} -> MessageData := @fun e => m!"💥️ {e.toMessageData}")
+  : Except Exception α → m MessageData
+| .ok val => return m!"{fn} ~~> {@ok val}"
+| .error e => return m!"{fn} ~~> {@err e}"
 
 def elabBoogieType : TSyntax `BoogieType -> TermElabM Ty
 | `(BoogieType| int) => return Ty.int
 | `(BoogieType| bool) => return Ty.bool
 | `(BoogieType| bv1) => return Ty.bv 1
+| `(BoogieType| bv2) => return Ty.bv 2
+| `(BoogieType| bv4) => return Ty.bv 4
+| `(BoogieType| bv8) => return Ty.bv 8
+| `(BoogieType| bv16) => return Ty.bv 16
 | `(BoogieType| bv32) => return Ty.bv 32
 -- | `(BoogieType| bv$n) => do
 --   let n : Q(Nat) <- Term.elabTermEnsuringType n q(Nat)
 --   return q(BitVec $n)
 | stx => throwError "elabBoogieType: Unknown syntax {stx}"
 
+/-- Small convenience type. Often we want to store the source `Syntax` for a `Name` to be able
+  to throw an error using `throwErrorAt stx`. -/
+structure NameWithStx where
+  stx : TSyntax `ident
+abbrev NameWithStx.getId : NameWithStx -> Name := fun ⟨stx⟩ => stx.getId
+-- instance : Coe (TSyntax `ident) NameWithStx where coe x := ⟨x⟩
+instance : Coe NameWithStx (TSyntax `ident) where coe x := x.stx
+instance : Coe NameWithStx Syntax where coe x := x.stx
+instance : Coe NameWithStx Name where coe x := x.stx.getId
+instance : BEq NameWithStx where beq a b := a.1.getId == b.1.getId
+instance : Hashable NameWithStx where hash n := hash n.1.getId
+instance : ToString NameWithStx where toString n := toString n.1.getId
+
+local instance [BEq A] [Hashable A] [ToString A] : ToString (Std.HashSet A) where
+  toString set := set.toList.toString
+
 /-- Collect names of mutable (i.e. boogie) variables used in an expression. (Yes this is not very efficient) -/
-partial def collectMutVars (stx : TSyntax `BoogieExpr) : MetaM (Std.HashSet Name) := do
+partial def collectMutVars (stx : TSyntax `BoogieExpr) : MetaM (Std.HashSet NameWithStx) := do
   withRef stx (go stx)
 where go
 | `(BoogieExpr| $_n:num ) => return {}
@@ -178,14 +221,16 @@ where go
 | `(BoogieExpr| $x:BoogieExpr - $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
 | `(BoogieExpr| $x:BoogieExpr == $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
 | `(BoogieExpr| $x:BoogieExpr <= $y:BoogieExpr) => return (<- collectMutVars x).union (<- collectMutVars y)
-| `(BoogieExpr| $f:ident($args,*)) => args.getElems.foldlM (fun acc arg => return acc.union (<- collectMutVars arg)) {f.getId}
-| `(BoogieExpr| $x:ident) => return {x.getId}
+| `(BoogieExpr| $_f:ident($args,*)) =>
+  -- note: we do not collect `f`, because functions can not be variables in boogie.
+  args.getElems.foldlM (fun acc arg => return acc.union (<- collectMutVars arg)) {}
+| `(BoogieExpr| $x:ident) => return {⟨x⟩}
   -- if (<- getThe BoogieElab).vars.contains x then return Std.HashSet.ofList [x]
   -- else throwError "collectMutVars: No such mutable variable {x}"
-| stx => throwError "collectMutVars: Unknown syntax {stx}"
+| stx => throwErrorAt stx "collectMutVars: Unknown syntax"
 
 /-- Collect names of mutable (i.e. boogie) variables used in a formula. -/
-partial def collectMutVarsFormula (stx : TSyntax `BoogieFormula) : MetaM (Std.HashSet Name) := do
+partial def collectMutVarsFormula (stx : TSyntax `BoogieFormula) : MetaM (Std.HashSet NameWithStx) := do
   withRef stx (go stx)
 where go
 | `(BoogieFormula| ($x:BoogieFormula)) => collectMutVarsFormula x
@@ -199,13 +244,8 @@ where go
 | stx => throwError "collectMutVarsFormula: Unknown syntax {stx}"
 
 def lookupVar (varName : Name) : BoogieElabM Γ (Option (EVar Γ)) := do
-  (<- get).varInfo[varName]?
-
-def lookupVarIdx (varName : Name) : BoogieElabM Γ (Option (Fin Γ.length)) := do
-  (<- get).varInfo[varName]?.map EVar.i
-
-def lookupVarTy (varName : Name) : BoogieElabM Γ (Option Ty) := do
-  (<- get).varInfo[varName]?.map EVar.A
+  let res := (<- get).varInfo.get? varName
+  return res
 
 /-- Read mutable variables from the boogie state monad, introducing them into the local context, and then run `m` in this new local context.
   Returns an expression like:
@@ -214,7 +254,7 @@ def lookupVarTy (varName : Name) : BoogieElabM Γ (Option Ty) := do
     bind (read "y") fun y =>
       /- whatever m evaluates to -/
   ``` -/
-def withReadMutVars {Γ : Con} (vs : List Name) (X : Q(Type)) (m : BoogieElabM Γ Q(ITree (EffB $Γ) $X)) : BoogieElabM Γ Q(ITree (EffB $Γ) $X) := do
+def withReadMutVars {Γ : Con} (vs : List NameWithStx) (X : Q(Type)) (m : BoogieElabM Γ Q(ITree (EffB $Γ) $X)) : BoogieElabM Γ Q(ITree (EffB $Γ) $X) := do
   match vs with
   | [] => m
   | v :: vs =>
@@ -222,52 +262,75 @@ def withReadMutVars {Γ : Con} (vs : List Name) (X : Q(Type)) (m : BoogieElabM �
       -- assertDefEq "(withReadMutVars) A ≡ Γ[i]" q($vTy) q(($Γ)[$i])
       -- let v : Q(Var $Γ $vTy) := (q(Var.ofIdx $vIdx) : Expr) -- okay because `Γ[vIdx] ≡ vTy`
       let a : Q(ITree (EffB $Γ) $A) := q(Mem.read $vq) -- here we use `embed` implicitly due to a coercion
-      let b : Q($A -> ITree (EffB $Γ) $X) <- withLocalDeclDQ v q($A) fun (v : Q($A)) => do
+      let b : Q($A -> ITree (EffB $Γ) $X) <- withLocalDeclDQ v.getId q($A) fun (v : Q($A)) => do
         let e : Q(ITree (EffB $Γ) $X) <- withReadMutVars vs X m
         mkLambdaFVars #[v] e
       return q(Bind.bind $a $b)
     else
-      throwError "withReadMutVars: Unknown variable {v}"
+      throwErrorAt v "withReadMutVars: Unknown variable"
 
 mutual
-  partial def elabBinOpM (A B B' : Q(Type)) (x y : TSyntax `BoogieExpr) (f : Q($A) -> Q($A) -> BoogieElabM Γ Q($B)) : BoogieElabM Γ Q($B) := do
-    if !(<- isDefEq B B') then throwError "elabBinOpM: {B} not defeq to {B'}"
-    let x <- elabBoogieExprPure A x
-    let y <- elabBoogieExprPure A y
-    f x y
+  partial def elabBoogieExprPure' (stx : TSyntax `BoogieExpr) : BoogieElabM Γ ((A : Q(Type)) × Q($A)) := do
+    let A <- mkFreshExprMVarQ q(Type)
+    let e <- elabBoogieExprPure A stx
+    return ⟨A, e⟩
 
-  partial def elabBinOp (A B B' : Q(Type)) (x y : TSyntax `BoogieExpr) (f : Q($A) -> Q($A) -> Q($B)) : BoogieElabM Γ Q($B) :=
-    elabBinOpM A B B' x y (fun x y => pure (f x y))
+  partial def elabBinOp (A : Q(Type)) (x y : TSyntax `BoogieExpr)
+    (f : (X Y : Q(Type)) -> (x : Q($X)) -> (y : Q($Y)) -> BoogieElabM Γ Q($A))
+    : BoogieElabM Γ Q($A)
+    := do
+    let ⟨X, x⟩ <- elabBoogieExprPure' x
+    let ⟨Y, y⟩ <- elabBoogieExprPure' y
+    f X Y x y
+
+  partial def elabBinOpInst (A : Q(Type)) (x y : TSyntax `BoogieExpr)
+    (Inst : (X Y : Q(Type)) -> Q(Type))
+    (f : {X Y : Q(Type)} -> {_inst : Q($(Inst X Y))} -> (x : Q($X)) -> (y : Q($Y)) -> BoogieElabM Γ Q($A))
+    : BoogieElabM Γ Q($A)
+    := do
+    let ⟨X, x⟩ <- elabBoogieExprPure' x
+    let ⟨Y, y⟩ <- elabBoogieExprPure' y
+    let inst <- mkInstMVar (Inst X Y)
+    @f X Y inst x y
+
+  -- partial def elabBinOp (A B B' : Q(Type)) (x y : TSyntax `BoogieExpr) (f : Q($A) -> Q($A) -> Q($B)) : BoogieElabM Γ Q($B) :=
+  --   elabBinOpM A B B' x y (fun x y => pure (f x y))
 
   /-- Evaluate a boogie expression, assuming that the Lean local context already contains variables
     which have been read from the boogie state monad, so assuming that we are within `withReadMutVars`. -/
   private partial def elabBoogieExprPure (A : Q(Type)) (stx : TSyntax `BoogieExpr) : BoogieElabM Γ Q($A) := do
-    let ret <- withRef stx (go stx)
-    let retTy <- inferType ret
-    if !(<- isDefEq retTy A) then throwError "Expected {A} but got {retTy}"
-    Term.addTermInfo' stx ret
-    return ret
+    withTraceNode `LeanBoogie.dsl (logger m!"elabBoogieExprPure (A≡{A}) `{stx}`") do
+      let ret <- withRef stx (go stx)
+      let retTy <- inferType ret
+      if !(<- isDefEq retTy A) then throwError "Expected {A} but got {retTy}"
+      Term.addTermInfo' stx ret
+      let ret <- instantiateExprMVars ret
+      return ret
   where go
   | `(BoogieExpr| $n:num ) => do
     let n : Nat := n.getNat
-    if !(<- isDefEq A q(Int)) then throwError "elabBoogieExpr: type must be int for int literals"
-    have ret : Q(Int) := q(Int.ofNat $n)
+    let ofnat : Q(OfNat $A $n) <- mkInstMVar q(OfNat $A $n)
+    trace[LeanBoogie.dsl] "Have literal {n}, type is {A}, ofnat ≡ {ofnat}"
+    have ret : Q($A) := q(($ofnat).ofNat)
     return ret
   | `(BoogieExpr| ( $x:BoogieExpr ) ) => elabBoogieExprPure A x
   | `(BoogieExpr| -$x:BoogieExpr)  => do
-    if !(<- isDefEq A q(Int)) then throwError "elabBoogieExpr: type must be int"
-    let x <- elabBoogieExprPure q(Int) x
-    return (q(-$x) : Q(Int))
-  | `(BoogieExpr| $x:BoogieExpr * $y:BoogieExpr)  => elabBinOp q(Int) q(Int) A x y (fun x y => q($x * $y))
-  | `(BoogieExpr| $x:BoogieExpr / $y:BoogieExpr)  => elabBinOp q(Int) q(Int) A x y (fun x y => q($x / $y))
-  | `(BoogieExpr| $x:BoogieExpr + $y:BoogieExpr)  => elabBinOp q(Int) q(Int) A x y (fun x y => q($x + $y))
-  | `(BoogieExpr| $x:BoogieExpr - $y:BoogieExpr)  => elabBinOp q(Int) q(Int) A x y (fun x y => q($x - $y))
-  | `(BoogieExpr| $x:BoogieExpr == $y:BoogieExpr) => do elabBinOpM (<- mkFreshExprMVarQ q(Type)) A A x y fun x y => do
-    let deq <- synthInstanceQ q(Decidable ($x = $y))
-    have : Q(Bool) := q(@decide ($x = $y) $deq)
-    return this
+    let x <- elabBoogieExprPure q($A) x
+    let _neg : Q(Neg $A) <- mkInstMVar q(Neg $A)
+    return q(-$x)
+  | `(BoogieExpr| $x:BoogieExpr * $y:BoogieExpr) => elabBinOpInst A x y (fun X Y => q(HMul $X $Y $A)) (fun x y => return q($x * $y))
+  | `(BoogieExpr| $x:BoogieExpr / $y:BoogieExpr) => elabBinOpInst A x y (fun X Y => q(HDiv $X $Y $A)) (fun x y => return q($x / $y))
+  | `(BoogieExpr| $x:BoogieExpr + $y:BoogieExpr) => elabBinOpInst A x y (fun X Y => q(HAdd $X $Y $A)) (fun x y => return q($x + $y))
+  | `(BoogieExpr| $x:BoogieExpr - $y:BoogieExpr) => elabBinOpInst A x y (fun X Y => q(HSub $X $Y $A)) (fun x y => return q($x - $y))
+  | `(BoogieExpr| $x:BoogieExpr == $y:BoogieExpr) => do
+    let B <- mkFreshExprMVarQ q(Type)
+    let x <- elabBoogieExprPure B x
+    let y <- elabBoogieExprPure B y
+    let deq <- mkInstMVar q(Decidable ($x = $y))
+    have res : Q(Bool) := .app q(@decide ($x = $y)) deq
+    return res
   | `(BoogieExpr| $x:BoogieExpr <= $y:BoogieExpr) => do
-    if !(<- isDefEq A q(Bool)) then throwError "elabBoogieExpr: type must be Bool"
+    if !(<- isDefEq A q(Bool)) then throwError "type must be Bool"
     let B : Q(Type) <- mkFreshExprMVarQ q(Type)
     let x <- elabBoogieExprPure B x
     let y <- elabBoogieExprPure B y
@@ -276,11 +339,21 @@ mutual
     have : Q(Bool) := q(@decide ($x <= $y) $deq)
     return this
   | stx@`(BoogieExpr| $f:ident($args,*)) => do
-    let fn <- realizeGlobalConstNoOverloadWithInfo f -- lookup function
-    let args <- args.getElems.mapM (elabBoogieExprPure (<- mkFreshExprMVar none))
-    let e <- mkAppM fn args
-    let eTy <- inferType e
-    if ¬(<- isDefEq eTy A) then throwErrorAt stx m!"Pure function application {stx} has type {eTy} but is expected to have type {A}"
+    let fn : Name <- realizeGlobalConstNoOverloadWithInfo f -- lookup name in Lean environment
+    let fn : Expr <- mkConst fn
+
+    let ⟨argMVars, argBi, fnType⟩ <- forallMetaTelescope (<- inferType fn)
+    -- `argMVars` is for example `#[?n : Nat, ?x : BitVec ?n, ?y : BitVec ?n]`.
+    -- Note how `?n` occurs in the expected type of subsequent mvars.
+    let argMVars := argMVars.zip argBi |>.filter (·.snd == BinderInfo.default) |>.map Prod.fst -- only the explicit args (to fit `mkAppM`)
+    -- now we want to assign each arg in `argMVars` to a concrete value, which we get from the syntax `args`.
+    if args.getElems.size != argMVars.size then throwError m!"Expected {argMVars.size} explicit args for {fn}, but got {args.getElems.size}."
+    args.getElems.zip argMVars |>.forM fun ⟨stx, mvar⟩ => do
+      let B : Q(Type) <- inferType mvar
+      let val <- elabBoogieExprPure B stx
+      mvar.mvarId!.assign val
+    let e <- mkAppM' fn argMVars
+    if ¬(<- isDefEq fnType A) then throwErrorAt stx m!"Pure function application {stx} has type {fnType} but is expected to have type {A}"
     return e
   | `(BoogieExpr| $x:ident) => do
     let some ldecl := (<- getLCtx).findFromUserName? x.getId | throwError "elabBoogieExpr: No such local var {x.getId}"
@@ -290,18 +363,21 @@ mutual
 
   /-- Given a boogie expression `x + y`, produces an expression `bind (get "x") (fun x => bind (get "y") (fun y => pure (x + y))) : ITree (EffB Γ) Int`. -/
   partial def elabBoogieExpr {Γ : Con} (A : Q(Type)) (stx : TSyntax `BoogieExpr) : BoogieElabM Γ Q(ITree (EffB $Γ) $A) := do
-    let vars <- collectMutVars stx
-    withReadMutVars vars.toList A (do
-      let val : Q($A) <- elabBoogieExprPure A stx
-      let m_val : Q(ITree (EffB $Γ) $A) := q(Pure.pure $val)
-      return m_val
-    )
+    withTraceNode `LeanBoogie.dsl (logger m!"elabBoogieExpr `{stx}`") do
+      let vars <- collectMutVars stx
+      trace[LeanBoogie.dsl] "collectMutVars returned {vars}"
+      withReadMutVars vars.toList A (do
+        let val : Q($A) <- elabBoogieExprPure A stx
+        let m_val : Q(ITree (EffB $Γ) $A) := q(Pure.pure $val)
+        return m_val
+      )
 end
 
 partial def elabBoogieFormula (stx : TSyntax `BoogieFormula) : BoogieElabM Γ Q(Prop) := do
-  let ret <- withRef stx (go stx)
-  Term.addTermInfo' stx ret
-  return ret
+  withTraceNode `LeanBoogie.dsl (logger m!"elabBoogieFormula `{stx}`") do
+    let ret <- withRef stx (go stx)
+    Term.addTermInfo' stx ret
+    return ret
 where go
 | `(BoogieFormula| ($x:BoogieFormula)) => elabBoogieFormula x
 | `(BoogieFormula| !$x:BoogieFormula) => do
@@ -338,26 +414,28 @@ where go
   return q($x -> $y)
 | stx => throwError "elabBoogieFormula: Unknown syntax {stx}"
 
-partial def elabBoogieAssume {Γ : Con} : TSyntax `BoogieAssume -> BoogieElabM Γ Q(ITree (EffB $Γ) Unit)
-| stx@`(BoogieAssume| assume $φ:BoogieFormula; ) => do
-  let vars <- collectMutVarsFormula φ
-  withReadMutVars vars.toList q(Unit) do
-    let φ : Q(Prop) <- elabBoogieFormula φ
-    let ret : Q(ITree (EffB $Γ) Unit) := q(LeanBoogie.assume $φ)
-    Term.addTermInfo' stx ret
-    return ret
-| stx => throwError "elabBoogieAssume: Unknown syntax {stx}"
+-- partial def elabBoogieAssume {Γ : Con} : TSyntax `BoogieAssume -> BoogieElabM Γ Q(ITree (EffB $Γ) Unit)
+-- | stx@`(BoogieAssume| assume%$tok_assume $φ:BoogieFormula; ) => do
+--   withTraceNode `LeanBoogie.dsl (logger m!"elabBoogieAssume `{stx}`") do
+--     let vars <- collectMutVarsFormula φ
+--     withReadMutVars vars.toList q(Unit) do
+--       let φ : Q(Prop) <- elabBoogieFormula φ
+--       let ret : Q(ITree (EffB $Γ) Unit) := q(LeanBoogie.assume $φ)
+--       Term.addTermInfo' stx ret
+--       Term.addTermInfo' tok_assume (ret.getBoundedAppFn 0)
+--       return ret
+-- | stx => throwError "elabBoogieAssume: Unknown syntax {stx}"
 
 /-- Creates a program which decides the truth value of each assume, returns conjunction of that. -/
 partial def elabBoogieAssume' {Γ : Con} : TSyntax `BoogieAssume -> BoogieElabM Γ Q(ITree (EffB $Γ) Bool)
-| _stx@`(BoogieAssume| assume $φ:BoogieFormula; ) => do
-  let vars <- collectMutVarsFormula φ
-  withReadMutVars vars.toList q(Bool) do
-    let φ : Q(Prop) <- elabBoogieFormula φ
-    let dφ <- synthInstanceQ q(Decidable $φ) -- ! Need `Decidable`, or later: Use events
-    let ret : Q(ITree (EffB $Γ) Bool) := q(return @decide $φ $dφ)
-    return ret
-    -- return q(.ret (decide $φ))
+| stx@`(BoogieAssume| assume $φ:BoogieFormula; ) => do
+  withTraceNode `LeanBoogie.dsl (logger m!"elabBoogieAssume' `{stx}`") do
+    let vars <- collectMutVarsFormula φ
+    withReadMutVars vars.toList q(Bool) do
+      let φ : Q(Prop) <- elabBoogieFormula φ
+      let dφ <- synthInstanceQ q(Decidable $φ) -- ! Need `Decidable`, or later: Use events
+      let ret : Q(ITree (EffB $Γ) Bool) := q(return @decide $φ $dφ)
+      return ret
 | stx => throwError "elabBoogieAssume: Unknown syntax {stx}"
 
 -- This is not in `BoogieElabM` because at this point we don't know the variables (and thus Γ) yet.
@@ -375,13 +453,15 @@ def elabBoogieVarCmds (binders: TSyntaxArray `BoogieVarCmd) : TermElabM (Array (
   binders.mapM fun
     | `(BoogieVarCmd| var $b; ) => elabBoogieVarBinder b
     | stx => throwError "elabBoogieVarCmds: unknown syntax {stx}"
-
 mutual
   /-- Elaborates a command such as `x := 2 * y;` or `while ... { ... }` into a monadic action. -/
   partial def elabBoogieCommand {Γ : Con} (stx : TSyntax `BoogieCommand) : BoogieElabM Γ Q(ITree (EffB $Γ) Unit) := do
-    let ret <- withRef stx (go stx)
-    Term.addTermInfo' stx ret
-    return ret
+    withTraceNode `LeanBoogie.dsl (logger m!"elabBoogieCommand `{stx}`") do
+      withSynthesize do
+        let ret <- withRef stx (go stx)
+        let ret <- instantiateExprMVarsQ ret
+        Term.addTermInfo' stx ret
+        return ret
   where go
   | _stx@`(BoogieCommand| $vName:ident := $e:BoogieExpr; ) => do
     if let some { A, vq, .. } := <- lookupVar vName.getId then
@@ -414,29 +494,32 @@ mutual
 end
 
 def elabBoogieBlock {Γ : Con} : TSyntax `BoogieBlock -> BoogieElabM Γ (EBlock Γ)
-| `(BoogieBlock| $lbl:ident : $assumes:BoogieAssume* $cmds:BoogieCommand* $gotoOrReturn:BoogieBlockGotoOrReturn ) => do
-  let lbl := lbl
-  let assumes : Array Q(ITree (EffB $Γ) Bool) <- assumes.mapM elabBoogieAssume'
-  let assumes : Q(ITree (EffB $Γ) Bool) :=
-    -- We do this extra check to avoid putting `q(return true)` as the neutral element in the fold
-    /- ! Side remark: These sort of handy little optimizations seem innocent, but they increase the
-      amount of trusted code.  -/
-    if h : assumes.size = 0 then q(return true)
-    else assumes[1:].toArray.foldl (fun (acc a : Q(ITree (EffB $Γ) Bool)) =>
-      q(do
-        let acc <- ($acc)
-        let a <- ($a)
-        return acc && a
-      ))
-      assumes[0]
-  let cmds : Q(ITree (EffB $Γ) Unit) <- elabBoogieCommands cmds
-  match gotoOrReturn with
-  | `(BoogieBlockGotoOrReturn| goto $gotos,*;) =>
-    -- let gotos : Array Name := gotos.getElems.map (fun g => g.getId)
-    return ⟨lbl, assumes, cmds, gotos⟩
-  | `(BoogieBlockGotoOrReturn| return;) =>
-    return ⟨lbl, assumes, cmds, #[]⟩
-  | _ => throwError "elabBoogieBlock: Unknown syntax {gotoOrReturn}"
+| stx@`(BoogieBlock| $lbl:ident : $assumes:BoogieAssume* $cmds:BoogieCommand* $gotoOrReturn:BoogieBlockGotoOrReturn ) => do
+  withTraceNode `LeanBoogie.dsl (logger' m!"elabBoogieBlock `{stx}`") do
+    let lbl := lbl
+    let assumes : Array Q(ITree (EffB $Γ) Bool) <- assumes.mapM elabBoogieAssume'
+    let assumes : Q(ITree (EffB $Γ) Bool) :=
+      -- We do this extra check to avoid putting `q(return true)` as the neutral element in the fold
+      /- ! Side remark: These sort of handy little optimizations seem innocent, but they increase the
+        amount of trusted code.  -/
+      if h : assumes.size = 0 then q(return true)
+      else assumes[1:].toArray.foldl (fun (acc a : Q(ITree (EffB $Γ) Bool)) =>
+        q(do
+          let acc <- ($acc)
+          let a <- ($a)
+          return acc && a
+        ))
+        assumes[0]
+    -- logInfo "a"
+    let cmds : Q(ITree (EffB $Γ) Unit) <- elabBoogieCommands cmds
+    -- throwError "b, cmds := {cmds}"
+    match gotoOrReturn with
+    | `(BoogieBlockGotoOrReturn| goto $gotos,*;) =>
+      -- let gotos : Array Name := gotos.getElems.map (fun g => g.getId)
+      return ⟨lbl, assumes, cmds, gotos⟩
+    | `(BoogieBlockGotoOrReturn| return;) =>
+      return ⟨lbl, assumes, cmds, #[]⟩
+    | _ => throwError "elabBoogieBlock: Unknown syntax {gotoOrReturn}"
 | stx => throwError "elabBoogieBlock: Unknown syntax {stx}"
 
 /-- Elab all arg, ret, and var binders, bundling them up into a `Γ : Con`. Also builds mapping
@@ -607,54 +690,64 @@ elab stx:BoogieProc : command => do
 --     let body <- elabBoogieCommands cmds
 --     sorry
 
-procedure foo(x: int, y: int) {
-  goto bb0;
-  bb0:
-    x := x + 20;
-    goto bb0, bb1;
-  bb1:
-    y := x + y;
-    goto bb0;
+-- procedure foo(x: int, y: int) {
+--   goto bb0;
+--   bb0:
+--     x := x + 20;
+--     goto bb0, bb1;
+--   bb1:
+--     y := x + y;
+--     goto bb0;
+-- }
+
+-- #print foo
+
+set_option trace.LeanBoogie.dsl true
+
+procedure test_func(x: bv32) {
+  x := x + 1;
 }
 
-#print foo
+#print test_func
 
-procedure bar(x: int) {
+#exit
+
+procedure bar(y:int, x: int) {
   goto bb0;
   bb0:
-    assume x == 10 && x <= 10;
+    assume y == 10 && x <= 10;
     x := x + 10;
     goto bb1;
   bb1:
+    x := x + 10;
     y := x + 10;
     goto bb0;
 }
 
-#print bar
-
 procedure baz(i: int) {
   i := 0;
-  while 0==0 {
+  while i == 0 {
     i := i + 1;
   }
 }
+
 #print baz
 
-procedure sum(n: int) returns (s: int) {
-  var i: int;
-  i := 0;
-  s := 0;
-  while (i <= n) {
-    i := i + 1;
-    s := s + i;
-  }
-}
+-- procedure sum(n: int) returns (s: int) {
+--   var i: int;
+--   i := 0;
+--   s := 0;
+--   while (i <= n) {
+--     i := i + 1;
+--     s := s + i;
+--   }
+-- }
 
-#print sum
-example : sum = sorry := by
-  rw [sum]
-  simp
+-- #print sum
+-- example : sum = sorry := by
+--   rw [sum]
+--   simp
 
-  done
+--   done
 
 end Elab

@@ -55,6 +55,7 @@ example : interp p1 = interp p2 := by
     rw [while_fp]
     rw [while_fp]
     rw [while_fp]
+  simp
 
   -- 2. Push `interp` inwards as far as possible,
   -- this will change `ITree.{pure, bind, iter, ite, read, write}`
@@ -121,6 +122,7 @@ example : interp p1 = interp p2 := by
 
   normalize
   simp
+
 
   sorry
 
