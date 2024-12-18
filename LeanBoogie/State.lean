@@ -1,5 +1,5 @@
 import LeanBoogie.Effect.Mem
-import LeanBoogie.Iter
+import LeanBoogie.Notation.Iter
 import LeanBoogie.ConTy
 
 namespace LeanBoogie
@@ -118,5 +118,3 @@ theorem interp_iter {f : A -> ITree (Mem Γ) (A ⊕ B)} {a₀ : A}
 theorem interp_read {v : Var Γ A} : interp (Mem.read v) = State.read v := sorry
 theorem interp_write {v : Var Γ A} : interp (Mem.write v val) = (State.write v val) := sorry
 theorem interp_ite [Decidable φ] : interp (if φ then t else e) = (if φ then interp t else interp e) := sorry
-
-#check Classical.byContradiction

@@ -162,6 +162,7 @@ structure EVar (Γ : Con) where
 /-- Knowledge about the boogie program while elaborating the boogie syntax.
   You could remember all kinds of analysis in this monad, you'd potentially even have to. -/
 structure BoogieElab (Γ : Con) where
+  procName : Name
   /-- Mapping of names to de-Brujin indices, but also the type of the variable. -/
   varInfo : Std.HashMap Name (EVar Γ)
   -- nBlocks : Q(Nat)
@@ -256,6 +257,8 @@ where go
 def lookupVar (varName : Name) : BoogieElabM Γ (Option (EVar Γ)) := do
   let res := (<- get).varInfo.get? varName
   return res
+
+def getProcName : BoogieElabM Γ Name := do return (<- get).procName
 
 /-- Read mutable variables from the boogie state monad, introducing them into the local context, and then run `m` in this new local context.
   Returns an expression like:
@@ -542,6 +545,19 @@ def selectBlock {Γ : Con} (N : Nat) (blocks : List (ITree (EffB Γ) (Fin N ⊕ 
   (i : Fin N) : ITree (EffB Γ) (Fin N ⊕ Unit)
   := blocks[i]
 
+private def liftBlockToDef {Γ : Con} {N : Nat} (name : Name) (block : Q(ITree (EffB $Γ) (Fin $N ⊕ Unit))) : MetaM Q(ITree (EffB $Γ) (Fin $N ⊕ Unit))  := do
+  let block <- instantiateMVars block
+  let decl : DefinitionVal := {
+    name
+    levelParams := []
+    type := <- inferType block
+    value := block
+    hints := .abbrev
+    safety := .safe
+  }
+  addDecl (.defnDecl decl)
+  return .const name []
+
 /-- Takes a bunch of pre-elaborated individual blocks, and ties them together with `iter`.
 
   If there are multiple goto labels `goto A, B, C;` attempts to derive `Decidable` for each of `A`,
@@ -589,7 +605,10 @@ def wireUpBlocksDeterministic {Γ : Con} (blocks : List (EBlock Γ)) (blocks_h :
         q(spin) -- we could get rid of this `spin` if we can prove that always at least one of the assumes is true.
       return q(do ($block.code); ($decideBranch))
 
-  let blocks' : List Q(ITree (EffB «$Γ») (Fin «$N» ⊕ Unit)) <- blocks.mapM buildBlock
+  let ns := (<- getCurrNamespace) ++ (<- getProcName)
+  let blocks' : List Q(ITree (EffB «$Γ») (Fin «$N» ⊕ Unit)) <- blocks.mapM fun b => do
+    let block <- buildBlock b
+    liftBlockToDef (ns ++ b.label.getId) block
   have : blocks'.length = blocks.length := by sorry
   let ⟨blocks'', h⟩ := List.q_len N blocks' (this ▸ hN)
   let prf <- assumeQ q(0 < $N) -- this can be optimized
@@ -649,7 +668,7 @@ def elabProcContext (stx : TSyntax `BoogieProc)
       let Γ : Con := [R] ++ L ++ P
       let Γ_names := [retBinder.map Prod.fst |>.get!] ++ L_names ++ P_names
       let varInfo <- buildVarInfo Γ_names (by sorry)
-      let t : Q(ITree (EffB $Γ) Unit) <- StateT.run' (cont Γ cmds blocks gotoOrReturn) { varInfo }
+      let t : Q(ITree (EffB $Γ) Unit) <- StateT.run' (cont Γ cmds blocks gotoOrReturn) { procName := proc.getId, varInfo }
       let t : Q(ITree (EffB ($L ++ $P)) $R) := q(runRes $t default) -- `default`-initialize the return variable.
       let t : Q($P -> ITree 0 $R) := q(runProc $t)
       return { name := proc.getId, G := [], P, R := some R, code := t }
@@ -657,7 +676,7 @@ def elabProcContext (stx : TSyntax `BoogieProc)
       let Γ : Con := L ++ P
       let Γ_names := L_names ++ P_names
       let varInfo <- buildVarInfo Γ_names (by sorry)
-      let t : Q(ITree (EffB $Γ) Unit) <- StateT.run' (cont Γ cmds blocks gotoOrReturn) { varInfo }
+      let t : Q(ITree (EffB $Γ) Unit) <- StateT.run' (cont Γ cmds blocks gotoOrReturn) { procName := proc.getId, varInfo }
       let t : Q($P -> ITree 0 Unit) := q(runProc $t)
       return { name := proc.getId, G := [], P, R := none, code := t }
   | stx => throwError "elabBoogieProcFrame: Unknown syntax {stx}"
@@ -782,7 +801,7 @@ procedure baz(i: int) {
   }
 }
 
-#print baz
+#print bar
 
 -- procedure sum(n: int) returns (s: int) {
 --   var i: int;

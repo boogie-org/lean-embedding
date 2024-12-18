@@ -1,3 +1,4 @@
+import LeanBoogie.Notation.Iter
 
 /-- Two imperative programs executed after one another. Provides the `;; ` notation. -/
 class Seqi (A : Type u) where

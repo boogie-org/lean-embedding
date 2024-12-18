@@ -1,12 +1,3 @@
-import LeanBoogie.Notation
-
-namespace LeanBoogie
-
-def case [Monad M] (ca : A -> M C) (cb : B -> M C) (ab : M (A ⊕ B)) : M C := do
-  match <- ab with
-  | .inl a => ca a
-  | .inr b => cb b
-
 /-
   # `Iter`ative monads
   This does not mention `ITree`s, but we can state some properties nonetheles.
@@ -67,6 +58,11 @@ def While [Iter M] (c : M Bool) (body : M Unit) : M Unit :=
   )
   ()
 
+def caseM [Monad M] (ca : A -> M C) (cb : B -> M C) (ab : M (A ⊕ B)) : M C := do
+  match <- ab with
+  | .inl a => ca a
+  | .inr b => cb b
+
 class LawfulIter (M : Type /- u -/ -> Type v) [Iter M] : Prop where
   iter_fp' {f : A -> M (A ⊕ B)} {a₀ : A}
     : iter f a₀
@@ -77,8 +73,8 @@ class LawfulIter (M : Type /- u -/ -> Type v) [Iter M] : Prop where
   while_fp {c : M Bool} : While c body = do if (<- c) then body; While c body
   /-- Unroll `iter` once. Note that the first case is `(fun a => iter f a)` instead of `iter f`,
     so that we can apply `iter_fp` multiple times. -/
-  iter_fp {f : A -> M (A ⊕ B)} {a₀ : A} : iter f a₀ = case (fun a => iter f a) pure (f a₀) := iter_fp'
-  iter_fp'' {f : A -> M (A ⊕ B)} : iter f = fun a₀ => case (iter f) pure (f a₀) := funext (fun a => iter_fp (a₀ := a))
+  iter_fp {f : A -> M (A ⊕ B)} {a₀ : A} : iter f a₀ = caseM (fun a => iter f a) pure (f a₀) := iter_fp'
+  iter_fp'' {f : A -> M (A ⊕ B)} : iter f = fun a₀ => caseM (iter f) pure (f a₀) := funext (fun a => iter_fp (a₀ := a))
 
 export LawfulIter (iter_fp iter_fp' iter_fp'' while_fp)
 

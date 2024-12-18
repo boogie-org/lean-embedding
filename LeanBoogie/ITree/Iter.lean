@@ -1,10 +1,9 @@
 import LeanBoogie.ITree.ITree
 import LeanBoogie.ITree.Monad
 import LeanBoogie.ITree.RunFinite
-import LeanBoogie.Iter
+import LeanBoogie.Notation.Iter
 
 namespace ITree
-open LeanBoogie
 
 /-
   ## ITrees form an *iterative* monad

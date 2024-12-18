@@ -192,7 +192,8 @@ example : ffs_imp (i0, ()) = ffs_ref (i0, ()) := by
   unfold ffs_imp
   simp
   rw [runProc, runRes]
-  congr 1
+  dsimp [Functor.map]
+  simp
 
   -- rw [ffs_imp]
 

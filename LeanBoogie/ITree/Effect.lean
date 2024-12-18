@@ -1,5 +1,6 @@
 import LeanBoogie.ITree.ITree
 import LeanBoogie.ITree.Iter
+import LeanBoogie.Notation.Iter
 
 namespace ITree
 
@@ -75,7 +76,7 @@ instance instHasEff_right {E₁ E₂ : Type -> Type} : HasEff E₂ (E₁ & E₂)
 /-- Interpreting events into another monad, which may again be the ITree monad but with e.g.
   fewer or different effects.
 -/
-def interp [Monad M] (h : {A : Type} -> E A -> M A) : ITree E A -> M A :=
+def interp [Monad M] [Iter M] (h : {A : Type} -> E A -> M A) : ITree E A -> M A :=
   sorry
 
 /-
