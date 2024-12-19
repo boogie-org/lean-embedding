@@ -240,6 +240,7 @@ attribute [irreducible] Uncurried ITree ret tau vis corec dest cases
   # Some convenience stuff
 -/
 
+def trigger (e : E A) : ITree E A := .vis e .ret
 def spin : ITree E A := corec (fun .unit => .tau .unit) PUnit.unit
 
 -- This implementation is extremely brittle. It is deceptively simple, but moving things around just

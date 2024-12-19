@@ -171,30 +171,37 @@ bb15:
 
 #check 10
 
--- todo1: Hide internal state
--- todo2: Lift each block into its own def to make terms smaller
+open ITree
 
-/-
-  Stuff in play:
-  - Global state: `G : Con`
-  - Return value: `R : Ty`
-  - Parameters: `P : Con`
-  - Local variables: `L : Con`
-
-  From the outside perspective, `procedure f(x: bv16, y: bv16) returns (r:bv32) { ... }` should have
-  the signature `[bv16, bv16]ᴬ -> ITree (Mem G) bv32ᴬ`, so a complete absence of local vars `L`.
-  Internally, we will have the context `Γ := L ++ P ++ [R] ++ G`.
-
-
--/
-
+-- set_option pp.fieldNotation.generalized false
 example : ffs_imp (i0, ()) = ffs_ref (i0, ()) := by
-  unfold ffs_imp
+  unfold ffs_imp --ffs_ref
   simp
-  rw [runProc, runRes]
-  dsimp [Functor.map]
-  simp
+  -- `runProc {L₁} t₁ params = runProc {L₂} t₂ params`
+  -- Here `t₁` has context `L₁ ++ P`, but `t₂` has context `L₂ ++ P`.
 
+  dsimp [runProc]
+  dsimp [Functor.map]
+
+  dsimp [runRes]
+  dsimp [Functor.map]
+  dsimp [ITree.embed]
+
+  -- grab next block
+  rw [iter_fp']
+  simp only [selectBlock, Fin.isValue, Fin.getElem_fin, Fin.val_zero, List.getElem_cons_zero]
+  rw [ffs_imp.bb0]
+  simp?
+
+
+  simp [interp_pure, interp_bind, State.interp_read, State.interp_write]
+
+  simp [Mem.read]
+  dsimp [Handler.inj, HasEff.inj]
+  simp [interp_trigger]
+  simp [Handler.case]
+  rw [Mem.split]
+  rw [Var.split]
   -- rw [ffs_imp]
 
   sorry

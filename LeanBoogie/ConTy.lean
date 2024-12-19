@@ -132,6 +132,21 @@ def Var.ofIdx : {Γ : Con} -> (i : Fin Γ.length) -> Var Γ Γ[i]
 | _ :: _, ⟨.zero, _⟩ => .vz
 | _ :: _, ⟨.succ n, h⟩ => .vs (Var.ofIdx ⟨n, Nat.succ_lt_succ_iff.mp h⟩)
 
+set_option linter.unusedVariables false in
+def Var.split : {Γ Δ : Con} -> Var (Γ ++ Δ) A -> Var Γ A ⊕ Var Δ A
+|        [], Δ, v     => .inr v
+| .(A) :: Γ, Δ, .vz   => .inl .vz
+|   B  :: Γ, Δ, .vs v => match Var.split v with
+                         | .inl v => .inl v.vs
+                         | .inr v => .inr v
+
+set_option linter.unusedVariables false in
+def Var.merge : {Γ Δ : Con} -> Var Γ A ⊕ Var Δ A -> Var (Γ ++ Δ) A
+| Γ, Δ, .inl v => sorry
+| Γ, Δ, .inr v => sorry
+
+-- theorem Var.split_merge : split ∘ merge = id := sorry
+
 def Con.getByVar : (Γ : Con) -> Var Γ A -> Ty
 | .(A) :: _, .vz => A
 | _ :: Γ, .vs v => Con.getByVar Γ v

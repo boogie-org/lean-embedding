@@ -8,79 +8,119 @@ namespace ITree
   # Effects
 -/
 
--- /-- Just a tag. -/
--- class IsEffect (E : Type -> Type)
-
 /-- No effects. This is essentially `Empty`. -/
 def None : Type -> Type := fun _ => PEmpty
-instance : Inhabited (Type -> Type) := ⟨None⟩
-instance : EmptyCollection (Type -> Type) := ⟨None⟩
-
-instance : OfNat (Type -> Type) 0 where ofNat := None
+@[reducible] instance : EmptyCollection (Type -> Type) := ⟨None⟩
+@[reducible] instance : OfNat (Type -> Type) 0 where ofNat := None
 
 /-- The union of two event types. -/
-inductive Effect.Prod (E₁ E₂ : Type -> Type) : Type -> Type
-| left  : E₁ Ans -> Prod E₁ E₂ Ans
-| right : E₂ Ans -> Prod E₁ E₂ Ans
+inductive EffProd (E F : Type -> Type) : Type -> Type
+| left  : E A -> EffProd E F A
+| right : F A -> EffProd E F A
+infixl:60 " & " => EffProd
 
-def Effect.NProd (Es : List (Type -> Type)) : (Type -> Type) :=
+def EffNProd (Es : List (Type -> Type)) : (Type -> Type) :=
   fun Ans => (i : Fin Es.length) -> Es[i] Ans
 
--- Maybe `Union` would be better?
--- instance : Add Effect := ⟨Effect.Prod⟩
--- instance : Add (Type -> Type) := ⟨Effect.Prod⟩
-infix:30 " & " => Effect.Prod
 
-#check None & None
-
-/-- Asserts that the collection of events `Es` has event `E`.
+/-- Asserts that the collection of events `F` has event `E`.
 
   Note: Usage of this typeclass in conjunction with `Effect.Prod` seems a little buggy, I haven't
   gotten around to why it is wonky yet.
 -/
-class HasEff (E : semiOutParam (Type -> Type)) (Es : Type -> Type) where
-  inj : {Ans : Type} -> E Ans -> Es Ans
-  /-- The rest of the events in `Es`, without `E`. -/
-  Strip : Type -> Type
-  elim : {Ans : Type} -> {motive : Type} -> (E Ans -> motive) -> (Strip Ans -> motive) -> Es Ans -> motive
+class HasEff (E : semiOutParam (Type -> Type)) (F : Type -> Type) where
+  inj : {A : Type} -> E A -> F A
+  -- /-- The rest of the events in `Es`, without `E`. -/
+  -- Strip : Type -> Type
+  -- elim : {A : Type} -> {motive : Type} -> (E A -> motive) -> (Strip A -> motive) -> F A -> motive
 
-instance instCoeEff {E Es : Type -> Type} [HasEff E Es] {Ans : Type} : Coe (E Ans) (Es Ans)
+variable {E F G : Type -> Type}
+variable {A : Type}
+
+instance instCoeEff [HasEff E F] : Coe (E A) (F A)
   := ⟨HasEff.inj⟩
 attribute [coe] HasEff.inj
 
-instance (priority := low) instHasEff_id {E : Type -> Type} : HasEff E E where
+instance (priority := low) instHasEff_id : HasEff E E where
   inj := id
-  Strip := None
-  elim l _ := l
+  -- Strip := None
+  -- elim l _ := l
 
-instance instHasEff_left {E₁ E₂ : Type -> Type} : HasEff E₁ (E₁ & E₂) where
+instance instHasEff_left : HasEff E (E & F) where
   inj := .left
-  Strip := E₂
-  elim l r := fun | .left e1 => l e1 | .right e2 => r e2
+  -- Strip := F
+  -- elim l r := fun | .left e1 => l e1 | .right e2 => r e2
 
-instance instHasEff_right {E₁ E₂ : Type -> Type} : HasEff E₂ (E₁ & E₂) where
+instance instHasEff_right : HasEff F (E & F) where
   inj := .right
-  Strip := E₁
-  elim l r := fun | .left e1 => r e1 | .right e2 => l e2
+  -- Strip := E
+  -- elim l r := fun | .left e1 => r e1 | .right e2 => l e2
 
 
 /-
   # Interp, Handlers
   The ITree paper just defines one `interp` using `iter`, for which you can then obtain concrete
   interpretations by giving it a `h`andler.
-  I wasn't able to figure out how `iter` is supposed to be used here. The code in the ITree repo
-  is slightly different from the code in the paper; I think the paper code may have some typos.
 -/
 
+variable {M : Type -> Type u} [Monad M] [Iter M]
+
+/-- Handles events `E` by interpreting them into the output monad `M`.
+  For example, `Handler (Mem Γ) (StateT ..)` -/
+def Handler (E : Type -> Type) (M : Type -> Type u) : Type _ :=
+  ⦃A : Type⦄ -> E A -> M A
 
 /-- Interpreting events into another monad, which may again be the ITree monad but with e.g.
-  fewer or different effects.
--/
-def interp [Monad M] [Iter M] (h : {A : Type} -> E A -> M A) : ITree E A -> M A :=
+  fewer or different effects. -/
+def interp [Monad M] [Iter M] (h : Handler E M) : ITree E A -> M A :=
+  -- Iter.iter (A := ITree E A) (B := ULift A) <|
+  --   ITree.cases (E:=E) (A:=A) (motive := fun _ => ITree E ((ITree E A) ⊕ A)) -- ! Need universe-polymorphic ITrees for this.
+  --     (fun (a : A) => return Sum.inr a)
+  --     (fun t => return Sum.inl t)
+  --     (fun e k => h e >>= fun ans => return Sum.inl (k ans))
   sorry
 
+variable {h : Handler E M}
+
+@[simp] theorem interp_pure : interp h (return a : ITree E A) = return a := by
+  sorry
+
+@[simp] theorem interp_trigger : interp h (trigger e) = h e := by
+  sorry
+
+@[aesop unsafe 1%]
+theorem interp_bind : interp h (a >>= b) = (interp h a) >>= (fun a => interp h (b a)) := by
+  sorry
+
+theorem interp_iter {f : A → ITree E (A ⊕ B) } : interp h (Iter.iter f a) = Iter.iter (fun a => interp h (f a)) a := by
+  sorry
+
+@[aesop unsafe 1%]
+theorem interp_ite [Decidable φ] : interp h (if φ then t else e) = (if φ then interp h t else interp h e) := by
+  split <;> simp_all only
+
+
 /-
-  # Embedding
+  ## Collection of common `Handler`s
+  Figure 10 in the ITree paper.
+-/
+
+def Handler.id : Handler E (ITree E) := fun _ => trigger
+def Handler.inj [HasEff E F] : Handler E (ITree F) := fun _ e => trigger (HasEff.inj e)
+
+def Handler.inl : Handler E (ITree (E & F)) := fun _ e => trigger (.left e)
+def Handler.inr : Handler F (ITree (E & F)) := fun _ e => trigger (.right e)
+def Handler.case (he : Handler E M) (hf : Handler F M) : Handler (E & F) M := fun _ e =>
+  match e with
+  | .left e => he e
+  | .right f => hf f
+
+def Handler.comp (f : Handler E (ITree F)) (g : Handler F (ITree G)) : Handler E (ITree G) :=
+  fun _ e => interp g (f e)
+
+
+/-
+  ## Embedding
 -/
 
 /-- We can embed an ITree with fewer effects into an ITree with more.
@@ -89,11 +129,6 @@ def interp [Monad M] [Iter M] (h : {A : Type} -> E A -> M A) : ITree E A -> M A 
   we only need handlers for `E` instead of for `Es`.
   If we happen to interp away all effects, using another theorem `interp_∅ t = t`.
 -/
-def embed [HasEff E Es] (t : ITree E A) : ITree Es A :=
-  sorry
+def embed [HasEff E F] : ITree E A -> ITree F A := interp Handler.inj
 
-instance [HasEff E Es] : Coe (ITree E A) (ITree Es A) := ⟨embed⟩
-
--- theorem interp_embed [HasEff E Es] {t : ITree E A} {h : {A : Type} -> Es A -> ITree E A}
---   : interp h (embed (Es := Es) t) = interp h t
---   := sorry
+instance [HasEff E F] : Coe (ITree E A) (ITree F A) := ⟨embed⟩

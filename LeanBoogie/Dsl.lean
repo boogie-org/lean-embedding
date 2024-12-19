@@ -149,7 +149,7 @@ structure EBlock (Γ : Con) where
 deriving Inhabited, Repr
 
 /-- An elaborated variable. This structure stores also some non-essential but precomputed stuff. -/
-structure EVar (Γ : Con) where
+structure EVar (Γ : Con) /- (E : Q(Type -> Type)) -/ where
   i : Fin Γ.length
   A : Ty := Γ.get i
   -- hA : Γ[i] = A
@@ -157,6 +157,8 @@ structure EVar (Γ : Con) where
   vq : Q(Var $Γ $A) := q($v)
   -- Ah : Q($Γ[$i] = $A)
   -- vh : Q($vq = $Ah ▸ Var.ofIdx $i)
+  -- read : Q($E $A)
+  -- write : Q($A -> $E Unit)
   deriving Repr
 
 /-- Knowledge about the boogie program while elaborating the boogie syntax.
@@ -545,6 +547,24 @@ def selectBlock {Γ : Con} (N : Nat) (blocks : List (ITree (EffB Γ) (Fin N ⊕ 
   (i : Fin N) : ITree (EffB Γ) (Fin N ⊕ Unit)
   := blocks[i]
 
+theorem selectBlock_select {N : Nat} {blocks : List (ITree (EffB Γ) (Fin N ⊕ Unit))} {hN : blocks.length = N} (i : Fin N)
+  : Iter.iter (selectBlock N blocks hN) i
+  = (do
+    let res <- blocks[i]'(selectBlock.proof_1 N blocks hN i)
+    match res with
+    | .inl i => Iter.iter (selectBlock N blocks hN) i
+    | .inr _unit => return _unit
+  )
+  := by
+    rw [iter_fp']
+    rw [selectBlock]
+    simp
+    congr
+    ext x : 1
+    cases x with
+    | inl val => simp_all only
+    | inr val_1 => simp_all only
+
 private def liftBlockToDef {Γ : Con} {N : Nat} (name : Name) (block : Q(ITree (EffB $Γ) (Fin $N ⊕ Unit))) : MetaM Q(ITree (EffB $Γ) (Fin $N ⊕ Unit))  := do
   let block <- instantiateMVars block
   let decl : DefinitionVal := {
@@ -612,20 +632,7 @@ def wireUpBlocksDeterministic {Γ : Con} (blocks : List (EBlock Γ)) (blocks_h :
   have : blocks'.length = blocks.length := by sorry
   let ⟨blocks'', h⟩ := List.q_len N blocks' (this ▸ hN)
   let prf <- assumeQ q(0 < $N) -- this can be optimized
-  return q(iter (selectBlock $N $(blocks'') $h) ⟨0, $prf⟩)
-
-/-- Given an ITree which may refer to default-initialized local vars `L`, parameters `P`,
-  obtain a `P -> ITree (Mem G) R`. -/
-def runProc {P L : Con} {R : Type} (t : ITree (Mem (L ++ P)) R) (p : P) : ITree 0 R :=
-  Prod.fst <$> interp' t ((default : L) ++ p)
-
-/-- Given an ITree which may refer to default-initialized local vars `L`, parameters `P`, and
-  global variables `G`, obtain a `P -> ITree (Mem G) R`. -/
-def runProcGlobals {G P L : Con} {R : Ty} (t : ITree (Mem (L ++ P ++ G)) R) (p : P) : ITree (Mem G) R :=
-  Prod.fst <$> interp' (Mem.split t) ((default : L) ++ p)
-
-def runRes {A : Ty} (t : ITree (Mem ([A] ++ Γ)) Unit) (a : A) : ITree (Mem Γ) A :=
-  (Prod.fst ∘ Prod.snd) <$> interp' (Mem.split t) (a, ())
+  return q(Iter.iter (selectBlock $N $(blocks'') $h) ⟨0, $prf⟩)
 
 abbrev TyA_or_Unit (A : Option Ty) : Type := A.map TyA |>.getD Unit
 
@@ -670,14 +677,14 @@ def elabProcContext (stx : TSyntax `BoogieProc)
       let varInfo <- buildVarInfo Γ_names (by sorry)
       let t : Q(ITree (EffB $Γ) Unit) <- StateT.run' (cont Γ cmds blocks gotoOrReturn) { procName := proc.getId, varInfo }
       let t : Q(ITree (EffB ($L ++ $P)) $R) := q(runRes $t default) -- `default`-initialize the return variable.
-      let t : Q($P -> ITree 0 $R) := q(runProc $t)
+      let t : Q($P -> ITree (Mem []) $R) := q(runProc $t)
       return { name := proc.getId, G := [], P, R := some R, code := t }
     else
       let Γ : Con := L ++ P
       let Γ_names := L_names ++ P_names
       let varInfo <- buildVarInfo Γ_names (by sorry)
       let t : Q(ITree (EffB $Γ) Unit) <- StateT.run' (cont Γ cmds blocks gotoOrReturn) { procName := proc.getId, varInfo }
-      let t : Q($P -> ITree 0 Unit) := q(runProc $t)
+      let t : Q($P -> ITree (Mem []) Unit) := q(runProc $t)
       return { name := proc.getId, G := [], P, R := none, code := t }
   | stx => throwError "elabBoogieProcFrame: Unknown syntax {stx}"
 where
