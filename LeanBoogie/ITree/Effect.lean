@@ -61,6 +61,15 @@ instance instHasEff_right : HasEff F (E & F) where
   # Interp, Handlers
   The ITree paper just defines one `interp` using `iter`, for which you can then obtain concrete
   interpretations by giving it a `h`andler.
+
+  I think it might be worthwhile to define handlers as going into monad transformers instead of monads:
+  ```
+  def HandlerT (E : Type -> Type) (T : (Type -> Type u) -> Type -> Type u) : Type _ :=
+    {M : Type -> Type u} -> {A : Type} -> E A -> T M A
+  ```
+  This might make composing handlers easier. For example, you could define *one* handler for
+  interpreting memory events, which results in `StateT (ConA Γ)`, instead of having a whole family
+  of handlers for every `M`, resulting in `StateT (ConA Γ) M`.
 -/
 
 variable {M : Type -> Type u} [Monad M] [Iter M]
@@ -70,15 +79,39 @@ variable {M : Type -> Type u} [Monad M] [Iter M]
 def Handler (E : Type -> Type) (M : Type -> Type u) : Type _ :=
   ⦃A : Type⦄ -> E A -> M A
 
+-- def HandlerT (E : Type -> Type) (T : (Type -> Type u) -> Type -> Type u) : Type _ :=
+--   {M : Type -> Type u} -> ⦃A : Type⦄ -> E A -> T M A
+
 /-- Interpreting events into another monad, which may again be the ITree monad but with e.g.
   fewer or different effects. -/
 def interp [Monad M] [Iter M] (h : Handler E M) : ITree E A -> M A :=
   -- Iter.iter (A := ITree E A) (B := ULift A) <|
-  --   ITree.cases (E:=E) (A:=A) (motive := fun _ => ITree E ((ITree E A) ⊕ A)) -- ! Need universe-polymorphic ITrees for this.
+  --   ITree.cases (E:=E) (A:=A) (motive := fun _ => ITree E ((ITree E A) ⊕ A)) -- ! Need universe-polymorphic ITrees for this. Alternatively, maybe a direct definition of `interp` with `corec`, without relying on `iter` will suffice?
   --     (fun (a : A) => return Sum.inr a)
   --     (fun t => return Sum.inl t)
   --     (fun e k => h e >>= fun ans => return Sum.inl (k ans))
   sorry
+
+
+/-
+  ## Collection of common `Handler`s
+  Figure 10 in the ITree paper.
+-/
+
+def Handler.id : Handler E (ITree E) := fun _ => trigger
+def Handler.inj [HasEff E F] : Handler E (ITree F) := fun _ e => trigger (HasEff.inj e)
+
+-- def Handler.left :
+def Handler.inl : Handler E (ITree (E & F)) := fun _ e => trigger (.left e)
+def Handler.inr : Handler F (ITree (E & F)) := fun _ e => trigger (.right e)
+def Handler.case (he : Handler E M) (hf : Handler F M) : Handler (E & F) M := fun _ e =>
+  match e with
+  | .left e => he e
+  | .right f => hf f
+
+def Handler.comp (f : Handler E (ITree F)) (g : Handler F (ITree G)) : Handler E (ITree G) :=
+  fun _ e => interp g (f e)
+
 
 variable {h : Handler E M}
 
@@ -99,26 +132,7 @@ theorem interp_iter {f : A → ITree E (A ⊕ B) } : interp h (Iter.iter f a) = 
 theorem interp_ite [Decidable φ] : interp h (if φ then t else e) = (if φ then interp h t else interp h e) := by
   split <;> simp_all only
 
-
-/-
-  ## Collection of common `Handler`s
-  Figure 10 in the ITree paper.
--/
-
-def Handler.id : Handler E (ITree E) := fun _ => trigger
-def Handler.inj [HasEff E F] : Handler E (ITree F) := fun _ e => trigger (HasEff.inj e)
-
-def Handler.inl : Handler E (ITree (E & F)) := fun _ e => trigger (.left e)
-def Handler.inr : Handler F (ITree (E & F)) := fun _ e => trigger (.right e)
-def Handler.case (he : Handler E M) (hf : Handler F M) : Handler (E & F) M := fun _ e =>
-  match e with
-  | .left e => he e
-  | .right f => hf f
-
-def Handler.comp (f : Handler E (ITree F)) (g : Handler F (ITree G)) : Handler E (ITree G) :=
-  fun _ e => interp g (f e)
-
-
+-- theorem interp_left (t : ITree (E & F) A) : interp (Handler.left h) t = sorry := sorry
 /-
   ## Embedding
 -/
@@ -132,3 +146,6 @@ def Handler.comp (f : Handler E (ITree F)) (g : Handler F (ITree G)) : Handler E
 def embed [HasEff E F] : ITree E A -> ITree F A := interp Handler.inj
 
 instance [HasEff E F] : Coe (ITree E A) (ITree F A) := ⟨embed⟩
+
+
+#check Multiset

@@ -58,6 +58,13 @@ theorem State.interp_write {v : Var Γ A} : interp State.handler (Mem.write v va
   rw [Mem.write, interp_trigger]; rfl
 end
 
+def State.run {E : Type -> Type} {Γ : Con} {R : Type} (t : ITree (E & Mem Γ) R) (γ : Γ) : ITree E R := do
+  let hleft  : Handler (    Mem Γ) (StateT Γ (ITree E)) := State.handler
+  let hright : Handler (E        ) (StateT Γ (ITree E)) := fun _ e => liftM (trigger e) -- this liftM feels dirty, maybe there's a better way
+  let h      : Handler (E & Mem Γ) (StateT Γ (ITree E)) := Handler.case hright hleft
+  let t := interp h t
+  Prod.fst <$> t γ
+
 /-- Given an ITree which may refer to default-initialized local vars `L`, parameters `P`,
   obtain a `P -> ITree (Mem G) R`. -/
 def runProc {P L : Con} {R : Type} (t : ITree (Mem (L ++ P)) R) (p : P) : ITree (Mem []) R :=

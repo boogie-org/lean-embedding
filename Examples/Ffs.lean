@@ -180,19 +180,12 @@ example : ffs_imp (i0, ()) = ffs_ref (i0, ()) := by
   -- `runProc {L₁} t₁ params = runProc {L₂} t₂ params`
   -- Here `t₁` has context `L₁ ++ P`, but `t₂` has context `L₂ ++ P`.
 
-  dsimp [runProc]
-  dsimp [Functor.map]
-
-  dsimp [runRes]
-  dsimp [Functor.map]
-  dsimp [ITree.embed]
-
   -- grab next block
   rw [iter_fp']
   simp only [selectBlock, Fin.isValue, Fin.getElem_fin, Fin.val_zero, List.getElem_cons_zero]
   rw [ffs_imp.bb0]
   simp?
-
+  -- dsimp [State.run]
 
   simp [interp_pure, interp_bind, State.interp_read, State.interp_write]
 
