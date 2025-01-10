@@ -1,11 +1,4 @@
 # Embedding of Boogie into Lean
 
-## Interaction Trees
-Allow us to model:
-- Non-termination
-- Memory, potentially even with weaker guarantees
-- Assume, Assert, Non-determinism
-- (Mutual) Recursion
-- Async?
-- External APIs?
-
+We use interaction trees in order to represent imperative programs.
+Currently this is a shallow embedding, with a Boogie DSL elaborating directly to ITrees.
