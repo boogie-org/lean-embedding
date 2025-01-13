@@ -2,6 +2,8 @@ import LeanBoogie.Effect.AmAtCh
 
 open ITree LeanBoogie
 
+namespace LeanBoogie.Examples.Spec
+
 def unsign (x : Int) : ITree Choice Int := do
   if <- choice Bool then
     return x
@@ -64,3 +66,5 @@ def divW : ITree0W Int := ⟨
   fun Post => Post spin ,
   sorry
 ⟩
+
+end LeanBoogie.Examples.Spec
