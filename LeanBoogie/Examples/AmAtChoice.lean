@@ -1,4 +1,4 @@
-import LeanBoogie.ITree
+import ITree
 import LeanBoogie.Effect.AmAtCh
 
 open LeanBoogie ITree
