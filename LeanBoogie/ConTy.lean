@@ -46,7 +46,7 @@ abbrev TyA : Ty -> Type
 | .unit => Unit
 | .int => Int
 | .real => Real
-| .bool => Bool
+| .bool => Prop
 | .bv bits => BitVec bits
 | .map A B => TyA A -> TyA B
 
@@ -57,7 +57,7 @@ def TyA.inhabited : {A : Ty} -> A
 | .unit => default
 | .int => default
 | .real => default
-| .bool => default
+| .bool => True
 | .bv _ => default
 | .map _ _ => fun _ => inhabited
 

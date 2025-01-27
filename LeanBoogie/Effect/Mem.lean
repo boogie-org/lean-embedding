@@ -49,5 +49,5 @@ private def i : Var Γ .int := .v0
 private def b : Var Γ (.bv32) := .v1
 private def f : Var Γ (.bool ~> .int) := .v2
 private example : ITree (Mem Γ) Unit := do
-  let fn : Bool -> Int <- Mem.read f
+  let fn : Prop -> Int <- Mem.read f
   Mem.write b (fn false)
