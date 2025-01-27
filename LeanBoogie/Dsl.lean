@@ -103,6 +103,8 @@ section Syntax
   syntax "if " BoogieExpr " { " BoogieCommand* " }" ("else" " { " BoogieCommand* " }")? : BoogieCommand
   syntax "while " BoogieExpr " { " BoogieCommand* " }" : BoogieCommand
   syntax "call " BoogieIdent "(" BoogieExpr,* ")" "; " : BoogieCommand
+  syntax ident " := " "call " BoogieIdent "(" BoogieExpr,* ")" "; " : BoogieCommand
+  syntax "assert " BoogieExpr "; " : BoogieCommand
   syntax BoogieAssume : BoogieCommand
 
   declare_syntax_cat BoogieBlock
@@ -113,6 +115,7 @@ section Syntax
 
   declare_syntax_cat BoogieProc
   syntax "procedure " ident "(" BoogieVarBinder,* ")"
+    -- TODO: multiple returns
     (" returns " "(" BoogieVarBinder ")")?
     " { "
       BoogieVarCmd*
@@ -120,6 +123,10 @@ section Syntax
       (BoogieBlockGotoOrReturn)?
       BoogieBlock*
     " }" : BoogieProc
+
+  declare_syntax_cat BoogieFunc
+  syntax "function " ident "(" BoogieVarBinder,* ")" ": " BoogieType  : BoogieFunc
+
 end Syntax
 
 

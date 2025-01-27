@@ -46,7 +46,7 @@ abbrev TyA : Ty -> Type
 | .unit => Unit
 | .int => Int
 | .real => Real
-| .bool => Prop
+| .bool => Bool
 | .bv bits => BitVec bits
 | .map A B => TyA A -> TyA B
 

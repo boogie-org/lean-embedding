@@ -24,6 +24,7 @@ variable {M : Type _ -> Type _} [Monad M] [Iter M]
 variable {E F : Type -> Type}
 
 def State.read (Γ) (v : Var Γ A) : StateT Γ M A := fun γ => return (γ.get v, γ)
+def State.readAll (Γ) : StateT Γ M Γ := fun γ => return (γ, γ)
 def State.write (Γ) (v : Var Γ A) (val : A) : StateT Γ M Unit := fun γ => return (.unit, γ.set v val)
 
 def State.iter [Monad M] [Iter M] {Γ : Type} (f : A -> StateT Γ M (A ⊕ B)) (a₀ : A) : StateT Γ M B :=
