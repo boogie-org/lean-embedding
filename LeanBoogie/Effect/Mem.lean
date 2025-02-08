@@ -15,11 +15,13 @@ open ITree (SubEff trigger Handler None)
 
 inductive Mem (Γ : Con) : Type -> Type where
 | rd : Var Γ A          -> Mem Γ A
+| rda : Mem Γ (ConA Γ)
 | wr : Var Γ A -> TyA A -> Mem Γ Unit
 -- /-- Simultaneously swap two variables. -/
 -- | swap : Var Γ A -> Var Γ A -> Mem Γ Unit
 
-def Mem.read  (v : Var Γ A)           : ITree (Mem Γ) A    := trigger (.rd v)
+def Mem.read  (v : Var Γ A)           : ITree (Mem Γ) A := trigger (.rd v)
+def Mem.readAll                       : ITree (Mem Γ) (ConA Γ) := trigger .rda
 def Mem.write (v : Var Γ A) (val : A) : ITree (Mem Γ) Unit := trigger (.wr v val)
 
 /-- Apply a pure function to a variable. E.g. `Mem.update x (· + 10)`. -/
@@ -29,6 +31,7 @@ abbrev Mem.update (v : Var Γ A) (f : A -> A) : ITree (Mem Γ) Unit := do
 
 -- def Mem.merge : ITree (Mem Γ & Mem Δ) A -> ITree (Mem (Γ ++ Δ)) A := sorry
 
+/-
 def Mem.split : Mem (Γ ++ Δ) A -> (Mem Γ & Mem Δ) A
 | .rd v => match v.split with
   | .inl v => .left (.rd v)
@@ -43,6 +46,7 @@ instance : SubEff (Mem (Γ ++ Δ)) (Mem Γ & Mem Δ) where
 instance : SubEff (Mem []) None where injEv e := nomatch e
 instance : SubEff (Mem []) ∅ where injEv e := nomatch e
 instance : SubEff (Mem []) 0 where injEv e := nomatch e
+-/
 
 private def Γ : Con := [.int, .bv 32, .bool ~> .int]
 private def i : Var Γ .int := .v0

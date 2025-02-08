@@ -2,9 +2,11 @@ import Lean
 import Std
 import Qq
 import ITree
+import LeanBoogie.Denotation
 import LeanBoogie.Effect.AssumeAssert
 import LeanBoogie.Effect.Mem
 import LeanBoogie.State
+import LeanBoogie.Syntax
 import LeanBoogie.TraceClasses
 import Batteries.Data.Array.Monadic
 
@@ -399,7 +401,7 @@ mutual
     return this
   | stx@`(BoogieExpr| $f:ident($args,*)) => do
     let fn : Name <- realizeGlobalConstNoOverloadWithInfo f -- lookup name in Lean environment
-    let fn : Expr <- mkConst fn
+    let fn : Lean.Expr <- mkConst fn
 
     let ⟨argMVars, argBi, fnType⟩ <- forallMetaTelescope (<- inferType fn)
     -- `argMVars` is for example `#[?n : Nat, ?x : BitVec ?n, ?y : BitVec ?n]`.
@@ -684,9 +686,9 @@ where
     for h : (i : Nat) in [0 : Γ.length] do -- surely this can be written nicer somehow?
       have h : i < Γ.length := by simp_all only [Membership.mem, zero_le, Array.toList_eq, Array.append_data, List.append_assoc, List.map_append, List.length_append, List.length_map, Array.data_length, true_and]
       let idx : Fin Γ.length := ⟨i, h⟩
-      let idxq : Q(Fin ($Γq).length) := (q($idx) : Expr)
+      let idxq : Q(Fin ($Γq).length) := (q($idx) : Lean.Expr)
       let A : Ty := Γ[idx]
-      let vq : Q(Var $Γq $A) := (q(@Var.ofIdx $Γq $idxq) : Expr)
+      let vq : Q(Var $Γq $A) := (q(@Var.ofIdx $Γq $idxq) : Lean.Expr)
       varInfo <- varInfo.insertNewOrFail names[i]!.getId
         {
           A := q($A)

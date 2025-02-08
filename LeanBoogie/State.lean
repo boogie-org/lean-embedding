@@ -45,6 +45,7 @@ instance {Γ : Type} [Monad M] [Iter M] : Iter (StateT Γ M) := ⟨State.iter⟩
   a family of handlers, one for every monad `M`. Although `M` is usually another `ITree _`. -/
 def State.handler : Handler (Mem Γ) (StateT Γ M)
 | _, .rd v => State.read _ v
+| _, .rda => State.readAll _
 | _, .wr v val => State.write _ v val
 
 
